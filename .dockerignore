@@ -1,0 +1,8 @@
+**
+!build/
+!build/media.Dockerfile
+!build/media.sh
+!artifacts/
+!artifacts/ffmpeg-9.0.2.tar.xz
+!artifacts/ffmpeg-9.0.2.tar.xz.asc
+!artifacts/ffmpeg-release.asc

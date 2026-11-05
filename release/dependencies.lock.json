@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "toolchain": "go1.27.3",
+  "goFlags": [
+    "-trimpath",
+    "-buildvcs=false",
+    "-mod=readonly",
+    "-ldflags=-buildid= -s -w"
+  ],
+  "environment": {
+    "CGO_ENABLED": "0",
+    "GOTOOLCHAIN": "local",
+    "GOAMD64": "v1",
+    "GOARCH": "amd64"
+  },
+  "goModules": [
+    {
+      "module": "golang.org/x/sys",
+      "commit": "b6b8557e8e2974925aec7a136ba0e323eedc5f43",
+      "version": "v0.49.0",
+      "sum": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA="
+    }
+  ],
+  "engine": {
+    "commit": "3395046476632f68fb4cc85fd10d42cfede40ec0",
+    "reason": "tracker-peer-DHT egress not accepted",
+    "websiteAdmission": false,
+    "tagObject": "8d1d2a2e9afb757dce8ecd719fc1389c4cd2250c",
+    "version": "MatriX.148"
+  },
+  "media": {
+    "version": "9.0.2",
+    "configuration": "build/media.sh",
+    "cleanRebuildIdentical": true,
+    "builder": "debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587",
+    "signingFingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+    "aptSnapshot": "20261105T000000Z"
+  },
+  "sources": [
+    {
+      "name": "go1.27.3.windows-amd64.zip",
+      "url": "https://go.dev/dl/go1.27.3.windows-amd64.zip",
+      "sha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff"
+    },
+    {
+      "name": "TorrServer-windows-amd64.exe",
+      "url": "https://github.com/YouROK/TorrServer/releases/download/MatriX.148/TorrServer-windows-amd64.exe",
+      "sha256": "b3f46be62d1bc185f88f036ee13c2ca42c9a718c6a0b40711cb4d212315c112b"
+    },
+    {
+      "name": "go1.27.3.linux-amd64.tar.gz",
+      "url": "https://go.dev/dl/go1.27.3.linux-amd64.tar.gz",
+      "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
+    },
+    {
+      "name": "TorrServer-linux-amd64",
+      "url": "https://github.com/YouROK/TorrServer/releases/download/MatriX.148/TorrServer-linux-amd64",
+      "sha256": "050fa49b90fb47a7a60dbbbaee96de6e072701b996b1f23eb3e3dc67d723fac1"
+    },
+    {
+      "name": "ffmpeg-9.0.2.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+      "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+    },
+    {
+      "name": "ffmpeg-9.0.2.tar.xz.asc",
+      "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc",
+      "sha256": "d617fd94ea354dadd2a8bb16243d37c44e1e9729b06b6ad58fe30bfb0fa943f2"
+    },
+    {
+      "name": "ffmpeg-release.asc",
+      "url": "https://ffmpeg.org/ffmpeg-devel.asc",
+      "sha256": "397b3becedcd5a98769967ff1ff8501ddc89f8368b8f766e4701377d7dbaabe5"
+    },
+    {
+      "name": "torrserver-source.tar.gz",
+      "url": "https://api.github.com/repos/YouROK/TorrServer/tarball/8d1d2a2e9afb757dce8ecd719fc1389c4cd2250c",
+      "sha256": "95e26bf163d19c342af40b1844733e53e8935f2dee2aa730913ab8d5c0e974bd"
+    }
+  ],
+  "platforms": {
+    "windows-amd64": [
+      {
+        "name": "torrserver.exe",
+        "sha256": "b3f46be62d1bc185f88f036ee13c2ca42c9a718c6a0b40711cb4d212315c112b"
+      },
+      {
+        "name": "ffmpeg.exe",
+        "sha256": "f8f3bf4ba80b75d363c8bcdb016c0714161823a0b6d5f0bf0c9531861228dec8"
+      },
+      {
+        "name": "ffprobe.exe",
+        "sha256": "59fdb9d727121bf5a064b09d37cfb3c83ccc0cd3222894da6614746ff958349e"
+      }
+    ],
+    "linux-amd64": [
+      {
+        "name": "torrserver",
+        "sha256": "050fa49b90fb47a7a60dbbbaee96de6e072701b996b1f23eb3e3dc67d723fac1"
+      },
+      {
+        "name": "ffmpeg",
+        "sha256": "d8a8952368700c76cae62e176e8a2eb5a67bb837064008ef4d4c3b035bb70f58"
+      },
+      {
+        "name": "ffprobe",
+        "sha256": "fa41340b86cbcb3ed17f69d4453087f1b6ac9a7feeac9b3a4bc8690a09b1ae9b"
+      }
+    ]
+  }
+}

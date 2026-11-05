@@ -36,7 +36,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	var lock struct{ Sources []source }
+	var lock struct {
+		Sources []source
+		Engine  struct{ PatchHashes map[string]string }
+	}
 	if err := json.Unmarshal(data, &lock); err != nil {
 		return err
 	}
@@ -63,6 +66,15 @@ func run() error {
 			return err
 		}
 		fmt.Println("Verified", item.Name)
+	}
+	for path, expected := range lock.Engine.PatchHashes {
+		if !filepath.IsLocal(path) {
+			return fmt.Errorf("invalid patch path")
+		}
+		if err := verify(path, expected); err != nil {
+			return err
+		}
+		fmt.Println("Verified", path)
 	}
 	return nil
 }

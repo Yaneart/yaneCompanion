@@ -29,8 +29,8 @@ type Engine struct {
 	address, password string
 }
 
-// Admission is intentionally unavailable in LC-003. Peer blocklists alone do
-// not enforce tracker/DHT egress; LC-004 must provide and test that boundary.
+// Pairing does not implement sessions. Keep website torrent admission closed
+// until validated locators and controller ownership are implemented.
 func (e *Engine) Admit(context.Context, []byte) error { return ErrAdmissionClosed }
 
 func Start(ctx context.Context, executable, directory string) (*Engine, error) {
@@ -105,10 +105,9 @@ func (e *Engine) ready(ctx context.Context) bool {
 	if err != nil || response.StatusCode != 200 || strings.TrimSpace(string(body)) != release.EngineVersion {
 		return false
 	}
-	// Check control auth and rejection of an unknown raw stream. This does NOT
-	// prove protection of an admitted stream: stock TorrServer permits playback
-	// of an existing hash without Basic auth. Admission remains closed until
-	// LC-004 supplies and verifies the complete engine boundary.
+	// This startup check catches wrong credentials/builds. The bundled-engine
+	// integration test separately verifies a known torrent with real metadata;
+	// an unknown hash alone cannot prove protection of an active raw stream.
 	for _, route := range []struct{ method, path, body string }{
 		{"POST", "/torrents", `{"action":"list"}`},
 		{"GET", "/stream?link=" + strings.Repeat("0", 40) + "&index=1&play", ""},

@@ -23,10 +23,25 @@
   ],
   "engine": {
     "commit": "3395046476632f68fb4cc85fd10d42cfede40ec0",
-    "reason": "tracker-peer-DHT egress not accepted",
+    "reason": "Public IPv4 TCP only; guarded peers and HTTP trackers; UDP/DHT/uTP/PEX disabled; raw HTTP auth required. Website session admission is a later stage.",
     "websiteAdmission": false,
     "tagObject": "8d1d2a2e9afb757dce8ecd719fc1389c4cd2250c",
-    "version": "MatriX.148"
+    "version": "MatriX.148-companion.1",
+    "upstreamVersion": "MatriX.148",
+    "torrentModule": "github.com/tsynik/torrent@v1.2.34",
+    "torrentModuleSum": "h1:ptxsr0IA7kaoDV1x/lrVLmz8s7xQ+nYgGJBHQvwM6Ck=",
+    "patchRecipe": "cmd/patch-engine/main.go",
+    "policy": "build/engine/guard.go",
+    "patchHashes": {
+      "build/engine/guard.go": "720eed578dfbb751942ef32c493f40108f6f18f3a830d3c040f34a5067f6ccfc",
+      "build/engine/guard_test.go": "37123027887a657823ed4e63029e0d30c78f137868ad1a2bb1361e4c73a55637",
+      "build/engine/testdata/socket_test.go": "1abff4d986e95bbca385ebd83c65831e2f7b61c2d94c13c419f668e9c86b47a3",
+      "build/engine/testdata/tracker_test.go": "006968fa9795a7740595a80fc5ba12218b376866fe10deb76b32d81d4345f0e0",
+      "cmd/patch-engine/main.go": "ac58c71a747c425d6313e0e7a032539251f5716fc23456153b18ec06d092a448",
+      "cmd/fetch-artifacts/main.go": "978bd375f67aa2206cb083068c8786f2d5195b979d8090c406153631fd51437e",
+      "scripts/engine.ps1": "4b99ed66c6642affc7211d0804d3366893b839f3c90f2db6b20826412fd91693",
+      "scripts/engine.sh": "0e471362e7f96fff7f1ee5fb553f9dfd4b2f454388abd2a428d391f78caab68f"
+    }
   },
   "media": {
     "version": "9.0.2",
@@ -37,6 +52,11 @@
     "aptSnapshot": "20261105T000000Z"
   },
   "sources": [
+    {
+      "name": "torrent-v1.2.34.zip",
+      "url": "https://proxy.golang.org/github.com/tsynik/torrent/@v/v1.2.34.zip",
+      "sha256": "ec6314019f00d3a62aa2462cda87b72be2f211d55efed136c9fc9f8132749f26"
+    },
     {
       "name": "go1.27.3.windows-amd64.zip",
       "url": "https://go.dev/dl/go1.27.3.windows-amd64.zip",
@@ -82,7 +102,7 @@
     "windows-amd64": [
       {
         "name": "torrserver.exe",
-        "sha256": "b3f46be62d1bc185f88f036ee13c2ca42c9a718c6a0b40711cb4d212315c112b"
+        "sha256": "2de25e6745794e544321f15e8cd045cc4ca9a0e0ee2fc1d37e23e33466fc562e"
       },
       {
         "name": "ffmpeg.exe",
@@ -96,7 +116,7 @@
     "linux-amd64": [
       {
         "name": "torrserver",
-        "sha256": "050fa49b90fb47a7a60dbbbaee96de6e072701b996b1f23eb3e3dc67d723fac1"
+        "sha256": "259306b4cc9f548504b534683bf610aa0982083d4b09aaf9b6e48263f8b7fe51"
       },
       {
         "name": "ffmpeg",

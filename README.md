@@ -1,15 +1,41 @@
 # yaneCompanion
 
-Нативный локальный помощник yaneMedia. Host управляет отдельными TorrServer и
-FFmpeg/ffprobe на устройстве зрителя. Пользовательский runtime не требует Node/Bun,
-PostgreSQL, Docker или checkout исходников.
+Локальная программа для yaneMedia, которую зритель будет запускать на своём
+компьютере. Наш код управляет готовыми инструментами: TorrServer отвечает за
+BitTorrent, FFmpeg/ffprobe — за обработку и определение формата видео и звука.
+Пользователю не потребуется устанавливать Node/Bun, PostgreSQL, Docker или исходники.
 
-Сейчас реализуется **LC-003**: запуск процесса, локальный HTTP bootstrap, управление
-дочерними процессами, ограниченные media jobs и восстановление собственного кэша.
-Сопряжение, приём раздач, playback API, tray и установщики относятся к следующим
-этапам. **Приём раздач закрыт**, capabilities playback не объявляются.
+Сейчас подготовлена основа **LC-003**: запуск и остановка программы, один работающий
+экземпляр, локальный HTTP-интерфейс, управление вспомогательными процессами,
+ограниченные задачи обработки медиа и очистка временных файлов после сбоя.
+LC-003 принят и закрыт 2026-11-05; код опубликован в `0c8d2b8`. По согласованию с
+пользователем обязательные native-проверки целевых ОС перенесены в LC-014.
+В **LC-004** добавлены сопряжение с сайтом, локальное подтверждение и отзыв доступа;
+этап принят пользователем и закрыт 2026-11-05 после ручной проверки. Коммиты пользователь создаст отдельно. Следующий этап — LC-005, не начат.
+Воспроизведение, значок в трее и установщики относятся к следующим этапам.
+**Добавление раздач с сайта пока недоступно.**
 
-## Структура и зависимости
+## Как ориентироваться в папках
+
+| Где                                       | Что там находится                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `cmd/yanecompanion/`                      | Вход в программу: принимает команды запуска, проверки состояния и выхода.                                |
+| `internal/`                               | Основной код помощника: общение с сайтом, управление TorrServer/FFmpeg, очередями, файлами и процессами. |
+| `test/` и файлы `*_test.go` рядом с кодом | Автоматические проверки отдельных функций и готовой программы.                                           |
+| `build/` и `scripts/`                     | Инструкции и команды для разработчика: скачать зависимости, собрать и проверить программу.               |
+| `release/`                                | Зафиксированные версии компонентов, проверка их целостности, сведения о сборке и лицензии.               |
+| `docs/`                                   | Результаты проверок и ещё не выполненные условия приёмки.                                                |
+| `.tools/` и `artifacts/`                  | Локальные инструменты сборки, кэши и скачанные зависимости. В Git не входят.                             |
+| `dist/`                                   | Собранная программа с необходимыми компонентами отдельно для Windows и Linux. В Git не входит.           |
+
+Начинать знакомство достаточно с этого README. Для чтения кода следующий маршрут:
+`cmd/yanecompanion/main.go` → `internal/app/app.go` → нужный модуль в `internal/`.
+Файлы с окончаниями `_windows.go` и `_linux.go` содержат различия между ОС;
+при сборке Go выбирает подходящий вариант.
+
+Ниже находятся подробности для разработки и проверки помощника.
+
+## Подробная структура и зависимости
 
 ```text
 cmd/
@@ -18,6 +44,7 @@ cmd/
 internal/
   app/              порядок запуска, остановки и локальные команды
   api/              HTTP boundary; не запускает engine или FFmpeg
+  pairing/          подтверждение подключения, сроки запросов и сохранённые verifiers
   config/           пользовательские paths и права доступа
   lifecycle/        блокировка экземпляра и дочерние процессы для каждой ОС
   engine/           закрытый adapter TorrServer, admission gate
@@ -76,8 +103,78 @@ Host слушает только `127.0.0.1:45723`. Повторный запу�
 .\yanecompanion.exe run --origin https://watch.example
 ```
 
-Этот origin — пример. Доступен только `GET /hello` с exact Origin/Host, no-store и
-пустыми capabilities. Pairing/controllers/sessions ещё не реализованы.
+Этот origin — пример, production allowlist пока не задан. Для другого домена
+перезапустите helper с его exact HTTPS origin и выполните новое сопряжение.
+`GET /hello` проверяет exact Origin/Host и объявляет только `pairing.v1`.
+
+Для текущего локального yaneMedia доступен отдельный opt-in:
+
+```powershell
+.\yanecompanion.exe run --dev-origin http://localhost:5173
+```
+
+`--dev-origin` принимает только exact HTTP origin с host `localhost`, `127.0.0.1`
+или `[::1]`; порт входит в проверку. Флаг не используется вместе с `--origin`.
+Другие HTTP hosts, LAN IP, userinfo, wildcard, path, query и fragment отклоняются.
+Обычный HTTPS allowlist не принимает HTTP. Dev-флаг разрешает локальную проверку
+без сертификатов; публичная HTTPS/LNA приёмка остаётся отдельной.
+
+На сайте нажмите «Локальный помощник» → «Подключить». Затем откройте локальное управление:
+
+```powershell
+.\yanecompanion.exe manage
+```
+
+Сравните адрес сайта и шестизначный код в обоих окнах, нажмите «Разрешить» в окне
+помощника. Там же можно отклонить запрос или отозвать сохранённый доступ. Для
+development на Linux команда `./yanecompanion manage` использует `xdg-open` в desktop
+сессии. Этот запуск управления не заменяет будущий tray launcher LC-010.
+
+Запрос живёт 120 секунд, одновременно ожидает один запрос, разрешены до пяти
+запросов в минуту. Browser хранит grant в IndexedDB только текущего origin/profile;
+helper сохраняет только SHA-256 verifier в user-only `pairings.json`. Новый boot
+сохраняет pairing. Токен аккаунта/cookies сайта помощнику не передаются.
+Management UI использует отдельный пятиминутный proof и собственный Origin, закрыт
+от CORS/framing; URL fragment с proof сразу удаляется. Повторная команда `manage`
+инвалидирует прежний proof. CLI bearer не попадает в страницу.
+
+Сайт различает несовместимую версию, известный browser permission denial и общий
+сбой подключения. Сопряжение доступно гостям. Capabilities воспроизведения и
+controllers/sessions пока отсутствуют; подключение не запускает раздачи.
+
+### Ручная приёмка LC-004 на Windows
+
+Сборка уже находится в `dist/windows-amd64`. Запустите помощник в одном PowerShell:
+
+```powershell
+Set-Location "$env:USERPROFILE\yaneCompanion\dist\windows-amd64"
+.\yanecompanion.exe run --dev-origin http://localhost:5173
+```
+
+Во втором PowerShell откройте локальное управление:
+
+```powershell
+Set-Location "$env:USERPROFILE\yaneCompanion\dist\windows-amd64"
+.\yanecompanion.exe manage
+```
+
+Откройте `http://localhost:5173`, обновите страницу и проверьте:
+
+1. «Локальный помощник» → «Подключить» показывает код. В локальном управлении тот
+   же код и exact адрес сайта. «Разрешить» даёт сообщение об успешном подключении;
+   сообщение об отсутствии локального просмотра сейчас ожидаемо.
+2. После обновления страницы «Проверить подключение» подтверждает сохранённый доступ
+   без нового кода. То же после `yanecompanion.exe exit` и повторного `run` с тем же флагом.
+3. «Отключить и отозвать доступ» удаляет подключение. Следующая попытка требует
+   нового локального подтверждения.
+4. «Отклонить» в помощнике даёт сообщение об отказе; «Отменить» на сайте убирает
+   ожидающий запрос из локального управления.
+5. После `yanecompanion.exe exit` подключение сообщает о недоступности помощника.
+
+Локальное окно управления действует 5 минут: при истечении снова выполните `manage`.
+Лимит создания запросов — пять в минуту; при его достижении подождите минуту.
+На телефоне/узком окне кнопка находится в меню мобильной шапки. Проверять playback
+для LC-004 ещё не требуется.
 
 ## Пользовательские данные и завершение
 
@@ -113,6 +210,7 @@ PowerShell и встроенный curl. Portable Go можно распаков
 
 ```powershell
 .\scripts\fetch.ps1
+.\scripts\engine.ps1 -Go .tools\go\bin\go.exe
 .\scripts\media.ps1
 .\scripts\build.ps1 -Target windows-amd64
 .\scripts\assemble.ps1 -Target windows-amd64
@@ -120,8 +218,17 @@ PowerShell и встроенный curl. Portable Go можно распаков
 
 Для cross-build использовать `-Target linux-amd64` в последних двух командах.
 `-Go C:\path\to\go.exe` выбирает portable toolchain. Linux developer с Go 1.27.3
-может скачать artifacts через `sh scripts/fetch.sh` и собрать host через
-`sh scripts/build.sh`; Docker media recipe одинакова для обеих платформ.
+может скачать artifacts через `sh scripts/fetch.sh`, собрать engine через
+`sh scripts/engine.sh` и host через `sh scripts/build.sh`; Docker media recipe
+одинакова для обеих платформ.
+
+Engine — **MatriX.148-companion.1**, сборка из закреплённого MatriX.148, без GST.
+`cmd/patch-engine` применяет небольшие изменения с проверкой контекста к upstream
+и его `tsynik/torrent v1.2.34`, не изменяя module cache. SHA-256 источников, patch
+recipe/policy и готовых binaries находятся в lock; `go mod verify` проверяет
+извлечённые зависимости перед копированием. Bundle содержит corresponding patch
+sources и recipe в `sources/companion-engine/`. Повторные сборки обоих engine
+targets совпали; сведения — в `release/engine-build.json`.
 
 FFmpeg/ffprobe собираются статически из подписанного release 9.0.2 с фиксированными
 flags, compiler environment и Debian snapshot. Сборка проверяет подпись с pinned
@@ -158,12 +265,20 @@ queue saturation/cancel, lock, cleanup, XDG и измеренные timeline anc
 Текущая матрица и границы доказательств находятся в
 [`docs/verification.md`](docs/verification.md). Контейнерные Linux-проверки не
 заменяют native desktop/install/tray acceptance.
+Проверки native Windows 11/Debian/Ubuntu/Arch обязательны в финальной приёмке LC-014;
+закрытие LC-003 не присваивает им статус PASS.
 
-До website admission требуется доказать tracker/peer/DHT egress на каждой ОС.
-Штатный peer blocklist TorrServer не считается такой защитой; текущий adapter
-безусловно возвращает `UNSUPPORTED_CAPABILITY` для admission.
-Кроме того, stock MatriX.148 допускает raw playback уже добавленной раздачи по
-известному hash без Basic auth: это отдельный незакрытый gate LC-004. Проверка
-`401` для неизвестного hash при startup не доказывает защиту активного потока.
+В patched engine все raw HTTP routes требуют Basic auth, browser Origin запрещён.
+Peer TCP, HTTP trackers и metadata HTTP проверяют фактический адрес после DNS перед
+connect, в том числе при redirects. Разрешён только публичный IPv4 TCP; special-purpose
+адреса и локальные interface subnets запрещены. Proxy из settings/env, IPv6,
+UDP trackers, DHT, uTP, PEX, local discovery и port mapping отключены принудительно.
+Раздачи, которым нужен только UDP/DHT, могут не находить peers.
+
+Focused проверки LC-004: `go test ./build/engine ./internal/api ./internal/pairing
+./internal/app ./internal/engine`; для последнего нужен `YANE_TEST_EXECUTABLE`.
+`scripts/engine.ps1` дополнительно проверяет реальные peer/tracker hooks upstream
+и невозможность включить DHT/uTP/proxy настройками. Сайт всё ещё не создаёт torrent
+sessions: validated locators/controllers относятся к следующим этапам.
 
 Лицензии и требования перед публикацией: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

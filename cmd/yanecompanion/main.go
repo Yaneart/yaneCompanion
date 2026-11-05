@@ -37,6 +37,7 @@ func run() error {
 	}
 	flags := flag.NewFlagSet("yaneCompanion", flag.ContinueOnError)
 	origin := flags.String("origin", "", "explicit HTTPS development origin (no production default)")
+	developmentOrigin := flags.String("dev-origin", "", "explicit HTTP localhost/127.0.0.1/[::1] development origin")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -45,6 +46,9 @@ func run() error {
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("INVALID_COMMAND")
+	}
+	if *origin != "" && *developmentOrigin != "" {
+		return fmt.Errorf("USE_ONE_ORIGIN_FLAG")
 	}
 	if command == "version" {
 		fmt.Println("yaneCompanion", release.Version)
@@ -56,7 +60,7 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if command == "status" || command == "exit" {
+	if command == "status" || command == "exit" || command == "manage" {
 		return app.Control(ctx, paths, command, os.Stdout)
 	}
 	if command != "run" {
@@ -69,9 +73,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("BUNDLE_MISSING")
 	}
-	options := app.Options{Paths: paths, BundleDir: filepath.Dir(executable), Ready: func() { fmt.Println("yaneCompanion ready (local admission disabled)") }}
+	options := app.Options{Paths: paths, BundleDir: filepath.Dir(executable), Ready: func() { fmt.Println("yaneCompanion ready (pairing available; playback admission disabled)") }}
 	if *origin != "" {
 		options.Origins = []string{*origin}
 	}
+	options.DevelopmentOrigin = *developmentOrigin
 	return app.Run(ctx, options)
 }

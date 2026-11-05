@@ -19,6 +19,7 @@ import (
 	"yanecompanion/internal/config"
 	"yanecompanion/internal/engine"
 	"yanecompanion/internal/lifecycle"
+	"yanecompanion/internal/pairing"
 	"yanecompanion/release"
 )
 
@@ -31,13 +32,17 @@ func randomID(bytes int) (string, error) {
 }
 
 type Options struct {
-	Paths     config.Paths
-	BundleDir string
-	Origins   []string
-	Ready     func()
+	Paths             config.Paths
+	BundleDir         string
+	Origins           []string
+	DevelopmentOrigin string
+	Ready             func()
 }
 
 func Run(ctx context.Context, options Options) (result error) {
+	if options.DevelopmentOrigin != "" && !api.ValidDevelopmentOrigin(options.DevelopmentOrigin) {
+		return errors.New("INVALID_DEVELOPMENT_ORIGIN")
+	}
 	for _, origin := range options.Origins {
 		if !api.ValidOrigin(origin) {
 			return errors.New("INVALID_ORIGIN")
@@ -51,6 +56,10 @@ func Run(ctx context.Context, options Options) (result error) {
 		return err
 	}
 	defer lock.Close()
+	pairings, err := pairing.Open(options.Paths.Config)
+	if err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp4", config.Address)
 	if err != nil {
 		return errors.New("PORT_IN_USE")
@@ -122,7 +131,7 @@ func Run(ctx context.Context, options Options) (result error) {
 	}
 	defer os.Remove(controlPath)
 	stop := make(chan struct{}, 1)
-	server := &http.Server{Handler: api.Handler{BootID: boot, LocalToken: localToken, Origins: options.Origins, Stop: stop}, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10}
+	server := &http.Server{Handler: api.Handler{BootID: boot, LocalToken: localToken, Origins: options.Origins, DevelopmentOrigin: options.DevelopmentOrigin, Stop: stop, Pairings: pairings, Management: &api.Management{}}, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	defer server.Close()
@@ -155,7 +164,7 @@ func Run(ctx context.Context, options Options) (result error) {
 }
 
 func Control(ctx context.Context, paths config.Paths, action string, output io.Writer) error {
-	if action != "status" && action != "exit" {
+	if action != "status" && action != "exit" && action != "manage" {
 		return errors.New("INVALID_COMMAND")
 	}
 	data, err := os.ReadFile(filepath.Join(paths.State, "control.json"))
@@ -170,10 +179,14 @@ func Control(ctx context.Context, paths config.Paths, action string, output io.W
 		return errors.New("STATE_UNAVAILABLE")
 	}
 	method := "GET"
-	if action == "exit" {
+	if action == "exit" || action == "manage" {
 		method = "POST"
 	}
-	request, _ := http.NewRequestWithContext(ctx, method, "http://"+config.Address+"/local/"+action, nil)
+	route := "/local/" + action
+	if action == "manage" {
+		route = "/local/manage/open"
+	}
+	request, _ := http.NewRequestWithContext(ctx, method, "http://"+config.Address+route, nil)
 	request.Header.Set("Authorization", "Bearer "+credential.Token)
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	defer client.CloseIdleConnections()
@@ -184,6 +197,17 @@ func Control(ctx context.Context, paths config.Paths, action string, output io.W
 	defer response.Body.Close()
 	if response.StatusCode != 200 && response.StatusCode != 202 {
 		return errors.New("CONTROL_FAILED")
+	}
+	if action == "manage" {
+		var ticket struct {
+			Token string `json:"managementToken"`
+		}
+		if json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&ticket) != nil || len(ticket.Token) != 64 {
+			return errors.New("CONTROL_FAILED")
+		}
+		if err := openManagement("http://" + config.Address + "/local/manage#" + ticket.Token); err != nil {
+			return errors.New("MANAGEMENT_BROWSER_UNAVAILABLE")
+		}
 	}
 	if action == "status" {
 		var status struct {

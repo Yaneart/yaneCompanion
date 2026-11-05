@@ -68,3 +68,45 @@ func TestOriginValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestDevelopmentOriginRequiresLocalOptIn(t *testing.T) {
+	for _, origin := range []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"} {
+		if !ValidDevelopmentOrigin(origin) || ValidOrigin(origin) {
+			t.Fatalf("development/HTTPS policy mismatch: %s", origin)
+		}
+		for _, configured := range []bool{false, true} {
+			h := Handler{Origins: []string{origin}}
+			if configured {
+				h.DevelopmentOrigin = origin
+			}
+			r := httptest.NewRequest("GET", "http://"+config.Address+"/hello", nil)
+			r.Header.Set("Origin", origin)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if configured && w.Code != 200 || !configured && w.Code != 403 {
+				t.Fatalf("HTTP opt-in=%v: %d", configured, w.Code)
+			}
+		}
+	}
+	for _, origin := range []string{
+		"http://watch.example", "http://192.168.1.2:5173", "http://127.0.0.2:5173",
+		"http://localhost.evil.example:5173", "http://127.0.0.1.evil.example:5173",
+		"http://localhost@evil.example:5173", "http://evil@localhost:5173",
+		"http://localhost:5173/", "http://localhost:5173?x=1", "http://localhost:5173#x",
+		"http://[::ffff:127.0.0.1]:5173", "http://*.localhost:5173", "https://localhost:5173", "null", "",
+	} {
+		if ValidDevelopmentOrigin(origin) {
+			t.Fatalf("accepted non-local or malformed development origin: %s", origin)
+		}
+	}
+	h := Handler{DevelopmentOrigin: "http://localhost:5173"}
+	for _, origin := range []string{"http://localhost:5174", "http://127.0.0.1:5173", "https://localhost:5173"} {
+		r := httptest.NewRequest("GET", "http://"+config.Address+"/hello", nil)
+		r.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 403 {
+			t.Fatalf("non-exact development origin accepted: %s", origin)
+		}
+	}
+}

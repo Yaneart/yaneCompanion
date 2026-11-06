@@ -1,14 +1,14 @@
 {
-  "engineVersion": "MatriX.148-companion.1",
-  "toolchain": "go1.27.3",
-  "upstreamCommit": "3395046476632f68fb4cc85fd10d42cfede40ec0",
-  "torrentModule": "github.com/tsynik/torrent@v1.2.34",
-  "inputLockSHA256": "831a523dd6d14b6574ce411108afc1bc7cc58a16bcafb376133988a02005ae54",
-  "freshSourceExtraction": true,
-  "verifiedModuleCache": true,
-  "repeatedBuildIdentical": true,
-  "platformSHA256": {
-    "windows-amd64": "2de25e6745794e544321f15e8cd045cc4ca9a0e0ee2fc1d37e23e33466fc562e",
-    "linux-amd64": "259306b4cc9f548504b534683bf610aa0982083d4b09aaf9b6e48263f8b7fe51"
-  }
+    "engineVersion":  "MatriX.148-companion.4",
+    "toolchain":  "go1.27.3",
+    "upstreamCommit":  "3395046476632f68fb4cc85fd10d42cfede40ec0",
+    "torrentModule":  "github.com/tsynik/torrent@v1.2.34",
+    "inputLockSHA256":  "48257e777fb895364619e2ab43df2252f00cf3986060346616be04a5c1108b5c",
+    "freshSourceExtraction":  true,
+    "verifiedModuleCache":  true,
+    "repeatedBuildIdentical":  true,
+    "platformSHA256":  {
+                           "windows-amd64":  "0d40987b45b1dd510b71b63a31428d33c5c57be1cd12486a77e1853254396c6a",
+                           "linux-amd64":  "d82b1fbe11b7a0dcc3cdd6ef45a5181ebb10d7109c8d21a5a6f16e5b01ace15f"
+                       }
 }

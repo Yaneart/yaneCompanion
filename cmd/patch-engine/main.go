@@ -56,6 +56,8 @@ func patch(source, dependency, guard string) error {
 		return os.WriteFile(path, data, 0600)
 	}
 	changes := [][3]string{
+		{"web/api/stream.go", "\tdata := \"\"\n\n\tnotAuth :=", "\tnotAuth :="},
+		{"web/api/stream.go", "\ttor := torr.GetTorrent(spec.InfoHash.HexString())\n\tif tor != nil {\n\t\ttitle = tor.Title\n\t\tposter = tor.Poster\n\t\tdata = tor.Data\n\t\tcategory = tor.Category\n\t}\n\tif tor == nil || tor.Stat == state.TorrentInDB {\n\t\ttor, err = torr.AddTorrent(spec, title, poster, data, category)\n\t\tif err != nil {\n\t\t\tc.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{\"error\": fmt.Errorf(\"error adding torrent: %v\", err).Error()})\n\t\t\treturn\n\t\t}\n\t}", "\t// Streaming cannot create a torrent, including after a cancelled request.\n\ttor := torr.GetTorrent(spec.InfoHash.HexString())\n\tif tor == nil || tor.Stat == state.TorrentInDB {\n\t\tc.AbortWithStatus(http.StatusNotFound)\n\t\treturn\n\t}"},
 		{"go.mod", "github.com/anacrolix/torrent v1.59.1 => github.com/tsynik/torrent v1.2.34", "github.com/anacrolix/torrent v1.59.1 => ./companion-torrent"},
 		{"cmd/main.go", "\t\"server\"", "\t\"server\"\n\t\"github.com/anacrolix/torrent/companionguard\""},
 		{"cmd/main.go", "func main() {", "func main() {\n\tcompanionguard.Install()"},
@@ -71,11 +73,16 @@ func patch(source, dependency, guard string) error {
 		{"companion-torrent/socket.go", "\t\"github.com/anacrolix/missinggo\"", "\t\"github.com/anacrolix/missinggo\"\n\t\"github.com/anacrolix/torrent/companionguard\""},
 		{"companion-torrent/socket.go", "dialer := net.Dialer{}", "dialer := companionguard.Dialer()"},
 		{"companion-torrent/client.go", "\tdefer func() {\n\t\tif err != nil {\n\t\t\tcl = nil", "\tcompanionConfig(cfg)\n\tdefer func() {\n\t\tif err != nil {\n\t\t\tcl = nil"},
+		{"companion-torrent/torrent.go", "\t\"github.com/anacrolix/torrent/metainfo\"", "\t\"github.com/anacrolix/torrent/metainfo\"\n\t\"github.com/anacrolix/torrent/companionguard/locator\""},
+		{"companion-torrent/torrent.go", "func (t *Torrent) setInfoBytes(b []byte) error {", "func (t *Torrent) setInfoBytes(b []byte) error {\n\tif err := locator.ValidateInfo(b); err != nil { return err }"},
+		{"companion-torrent/torrent.go", "bytes > 10000000", "bytes > locator.MaxBytes"},
 		{"companion-torrent/tracker/http.go", "\t\"net\"\n", "\t\"github.com/anacrolix/torrent/companionguard\"\n"},
 		{"companion-torrent/tracker/http.go", "\t\t\tDial: (&net.Dialer{\n\t\t\t\tTimeout: 15 * time.Second,\n\t\t\t}).Dial,", "\t\t\tDialContext: companionguard.Dialer().DialContext,"},
 		{"companion-torrent/tracker/http.go", "\t\t\tProxy:               opt.HTTPProxy,", "\t\t\tProxy:               nil,"},
 		{"companion-torrent/tracker/http.go", "\t\t\t\tInsecureSkipVerify: true,", "\t\t\t\tMinVersion: tls.VersionTLS12,"},
-		{"companion-torrent/tracker/tracker.go", "\tcase \"udp\", \"udp4\", \"udp6\":\n\t\treturn announceUDP(me, _url)", "\tcase \"udp\", \"udp4\", \"udp6\":\n\t\treturn res, errors.New(\"COMPANION_UDP_DISABLED\")"},
+		{"companion-torrent/tracker/udp.go", "\t\"net/url\"", "\t\"net/url\"\n\t\"github.com/anacrolix/torrent/companionguard\""},
+		{"companion-torrent/tracker/udp.go", "c.socket, err = net.Dial(c.dialNetwork(), hmp.String())", "c.socket, err = companionguard.TrackerDialer().DialContext(c.a.Context, \"udp4\", hmp.String())"},
+		{"companion-torrent/tracker/udp.go", "func announceUDP(opt Announce, _url *url.URL) (AnnounceResponse, error) {", "func announceUDP(opt Announce, _url *url.URL) (AnnounceResponse, error) {\n\tif opt.UdpNetwork == \"udp6\" || _url.Scheme == \"udp6\" { return AnnounceResponse{}, companionguard.ErrDenied }\n\tctx := opt.Context\n\tif ctx == nil { ctx = context.Background() }\n\tctx, cancel := context.WithTimeout(ctx, 15*time.Second)\n\tdefer cancel()\n\topt.Context = ctx"},
 	}
 	for _, change := range changes {
 		if err := edit(change[0], change[1], change[2]); err != nil {
@@ -115,7 +122,7 @@ func patch(source, dependency, guard string) error {
 			}
 		}
 	}
-	for _, test := range [][2]string{{"socket_test.go", "companion_security_test.go"}, {"tracker_test.go", "tracker/companion_security_test.go"}} {
+	for _, test := range [][2]string{{"socket_test.go", "companion_security_test.go"}, {"tracker_test.go", "tracker/companion_security_test.go"}, {"metadata_test.go", "companion_metadata_test.go"}} {
 		data, err := os.ReadFile(filepath.Join(guard, "testdata", test[0]))
 		if err != nil {
 			return err
@@ -123,6 +130,9 @@ func patch(source, dependency, guard string) error {
 		if err := os.WriteFile(filepath.Join(destination, filepath.FromSlash(test[1])), data, 0600); err != nil {
 			return err
 		}
+	}
+	if err := os.CopyFS(filepath.Join(destination, "companionguard", "locator"), os.DirFS(filepath.Join(guard, "..", "..", "internal", "locator"))); err != nil {
+		return err
 	}
 	return os.WriteFile(filepath.Join(destination, "companion_config.go"), []byte(`package torrent
 

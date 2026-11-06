@@ -25,8 +25,11 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'cmd\patch-engine') -Destination 
 Copy-Item -LiteralPath (Join-Path $projectRoot 'cmd\fetch-artifacts') -Destination (Join-Path $engineRecipe 'cmd') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\engine.ps1') -Destination (Join-Path $engineRecipe 'scripts') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\engine.sh') -Destination (Join-Path $engineRecipe 'scripts') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\assemble.ps1') -Destination (Join-Path $engineRecipe 'scripts') -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $engineRecipe 'build'), (Join-Path $engineRecipe 'release'), (Join-Path $engineRecipe 'artifacts') | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build\engine') -Destination (Join-Path $engineRecipe 'build') -Recurse -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $engineRecipe 'internal') | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot 'internal\locator') -Destination (Join-Path $engineRecipe 'internal') -Recurse -Force
 foreach ($name in @('go.mod','go.sum')) { Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $engineRecipe -Force }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'release\dependencies.lock.json') -Destination (Join-Path $engineRecipe 'release') -Force
 foreach ($name in @('torrserver-source.tar.gz','torrent-v1.2.34.zip')) { Copy-Item -LiteralPath (Join-Path $projectRoot ('artifacts\' + $name)) -Destination (Join-Path $engineRecipe 'artifacts') -Force }

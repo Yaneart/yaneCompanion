@@ -126,7 +126,11 @@ func TestNarrowPreflightAndJSON(t *testing.T) {
 		}
 	}
 	for _, body := range []string{"null", "[]", `{"locator":"magnet:invalid"}`, "{}{}", "{", strings.Repeat("x", 1025), `{"approve":true,"approve":false}`} {
-		if w := call(h, "POST", "/v1/pairings", website, "", body); w.Code != 400 {
+		want := 400
+		if len(body) > 1024 {
+			want = 413
+		}
+		if w := call(h, "POST", "/v1/pairings", website, "", body); w.Code != want {
 			t.Fatalf("malformed JSON accepted: %q %d", body, w.Code)
 		}
 	}

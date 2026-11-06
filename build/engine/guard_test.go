@@ -21,7 +21,7 @@ func TestSpecialAddresses(t *testing.T) {
 		"[::ffff:127.0.0.1]:80", "[2001:4860:4860::8888]:443", "[fe80::1%eth0]:80",
 		"localhost:80", "2130706433:80", "127.1:80", "1.1.1.1:0", "1.1.1.1",
 	} {
-		if Public(address) || !errors.Is(Control("tcp4", address, nil), ErrDenied) {
+		if Public(address) || !errors.Is(Control("tcp4", address, nil), ErrDenied) || !errors.Is(trackerControl("udp4", address, nil), ErrDenied) {
 			t.Errorf("permitted %s", address)
 		}
 	}
@@ -32,6 +32,36 @@ func TestSpecialAddresses(t *testing.T) {
 	}
 	if Control("udp4", "1.1.1.1:80", nil) == nil || Control("tcp6", "[::ffff:1.1.1.1]:80", nil) == nil {
 		t.Fatal("unsupported transport permitted")
+	}
+}
+
+func TestTrackerSocketsNeverReachLocalNetwork(t *testing.T) {
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := strconv.Itoa(listener.LocalAddr().(*net.UDPAddr).Port)
+	for _, address := range []string{"127.0.0.1:" + port, "localhost:" + port} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		conn, err := TrackerDialer().DialContext(ctx, "udp4", address)
+		cancel()
+		if conn != nil {
+			conn.Write([]byte("must never arrive"))
+			conn.Close()
+		}
+		if !errors.Is(err, ErrDenied) {
+			t.Fatalf("UDP connect %s: %v", address, err)
+		}
+	}
+	listener.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+	if _, _, err := listener.ReadFromUDP(make([]byte, 64)); err == nil {
+		t.Fatal("private UDP service received a datagram")
+	}
+	for _, network := range []string{"udp", "udp6", "tcp4"} {
+		if !errors.Is(trackerControl(network, "1.1.1.1:6969", nil), ErrDenied) {
+			t.Fatalf("tracker permitted transport %s", network)
+		}
 	}
 }
 

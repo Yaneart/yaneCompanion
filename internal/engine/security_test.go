@@ -98,4 +98,19 @@ func TestBundledEngineRawAuth(t *testing.T) {
 			t.Errorf("browser raw route %s: %d", path, status)
 		}
 	}
+	// A stream request queued before stop may reach the server after Drop.
+	// Reading the removed hash must never perform torrent admission again.
+	if status, _ := request("GET", "/stream?link="+hash+"&index=1&m3u", "", true, ""); status != http.StatusOK {
+		t.Fatalf("active torrent playlist: expected 200, got %d", status)
+	}
+	if err := e.Drop(context.Background(), hash); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := request("GET", "/stream?link="+hash+"&index=1&play", "", true, ""); status != http.StatusNotFound {
+		t.Fatalf("removed torrent stream: expected 404, got %d", status)
+	}
+	if status, body := request("POST", "/torrents", `{"action":"list"}`, true, ""); status != 200 || strings.Contains(body, hash) {
+		t.Fatalf("stream recreated removed torrent: %d %s", status, body)
+	}
+
 }

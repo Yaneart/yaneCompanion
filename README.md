@@ -11,9 +11,13 @@ BitTorrent, FFmpeg/ffprobe — за обработку и определение
 LC-003 принят и закрыт 2026-11-05; код опубликован в `0c8d2b8`. По согласованию с
 пользователем обязательные native-проверки целевых ОС перенесены в LC-014.
 В **LC-004** добавлены сопряжение с сайтом, локальное подтверждение и отзыв доступа;
-этап принят пользователем и закрыт 2026-11-05 после ручной проверки. Коммиты пользователь создаст отдельно. Следующий этап — LC-005, не начат.
+этап принят пользователем и закрыт 2026-11-05 после ручной проверки; коммиты
+`yaneMedia 1c71769` / `yaneCompanion 505cc0d` проверены.
+В **LC-005** реализованы отдельный metadata discovery на сайте, validated locators,
+controller leases и локальный приём раздачи с выбором файла. Этап ожидает ручной
+приёмки и пользовательских коммитов.
 Воспроизведение, значок в трее и установщики относятся к следующим этапам.
-**Добавление раздач с сайта пока недоступно.**
+**Локальная загрузка доступна в Public; воспроизведение ещё не подключено.**
 
 ## Как ориентироваться в папках
 
@@ -45,9 +49,11 @@ internal/
   app/              порядок запуска, остановки и локальные команды
   api/              HTTP boundary; не запускает engine или FFmpeg
   pairing/          подтверждение подключения, сроки запросов и сохранённые verifiers
+  locator/          проверка magnet/.torrent и peer metadata до открытия storage
+  sessions/         владельцы вкладок, lease, operations и ограниченная загрузка
   config/           пользовательские paths и права доступа
   lifecycle/        блокировка экземпляра и дочерние процессы для каждой ОС
-  engine/           закрытый adapter TorrServer, admission gate
+  engine/           закрытый adapter TorrServer; только проверенный ввод
   media/            ограниченный worker runner и чистая timeline policy
   jobs/             одна активная и одна ожидающая работа на lane
   cache/            бюджет, свободное место и confined crash cleanup
@@ -105,7 +111,8 @@ Host слушает только `127.0.0.1:45723`. Повторный запу�
 
 Этот origin — пример, production allowlist пока не задан. Для другого домена
 перезапустите helper с его exact HTTPS origin и выполните новое сопряжение.
-`GET /hello` проверяет exact Origin/Host и объявляет только `pairing.v1`.
+`GET /hello` проверяет exact Origin/Host и объявляет `pairing.v1`,
+`torrent-admission.v1` и `torrent-files.v1`; playback capabilities пока отсутствуют.
 
 Для текущего локального yaneMedia доступен отдельный opt-in:
 
@@ -139,8 +146,52 @@ Management UI использует отдельный пятиминутный p
 инвалидирует прежний proof. CLI bearer не попадает в страницу.
 
 Сайт различает несовместимую версию, известный browser permission denial и общий
-сбой подключения. Сопряжение доступно гостям. Capabilities воспроизведения и
-controllers/sessions пока отсутствуют; подключение не запускает раздачи.
+сбой подключения. Сопряжение доступно гостям; само подключение не запускает раздачи.
+`torrent-admission.v1` и `torrent-files.v1`
+разрешают отдельный явный выбор; `sessions.v1`/media capabilities ещё не объявлены.
+
+### Ручная приёмка LC-005
+
+Запустите Public-конфигурацию yaneMedia (`VITE_SERVER_TORRENT_ENABLED=false`),
+оставив server streaming выключенным. Backend использует настройки JSON API
+JacRed/Knaben из своего env; при отсутствии источников доступен ручной ввод.
+Для локального Public preview с портом 5174 запустите helper:
+
+```powershell
+.\yanecompanion.exe run --dev-origin http://localhost:5174
+```
+
+Откройте произведение → меню источника → «Торренты». Подключите помощник обычным
+способом и подтвердите код через `manage`. «Найти раздачи» не создаёт серверную
+сессию; выбранный candidate передаётся helper после отдельного resolve на 120 s.
+Ручные magnet и `.torrent` уходят только в helper, без backend upload. Выберите
+видео из списка: текущая версия получает ограниченный префикс до 1 MiB и показывает
+количество байтов. Готового media source пока нет — это LC-006/008.
+«Остановить загрузку», отзыв доступа, уход со страницы или смена аккаунта закрывают
+controller; пропавшая вкладка ограничена lease 180 s. Каждая вкладка имеет своего
+владельца, второе одновременное открытие получает `DEVICE_BUSY`.
+
+Ввод: magnet до 4 KiB/20 trackers, .torrent до 2 MiB, 500 files/200 GiB;
+symlink/webseed/traversal/collisions и неподдержанные features отклоняются.
+Helper передаёт движку только проверенный locator. Для magnet тот же валидатор
+встроен в patched engine и проверяет peer info dictionary перед storage.
+
+Focused проверки: `go test ./internal/locator ./internal/sessions ./internal/api
+./internal/pairing ./internal/engine ./internal/app`; для bundled raw-auth test
+укажите `YANE_TEST_EXECUTABLE`. Настоящие `.torrent` и cold-magnet transfers можно
+повторить без Internet egress после `scripts/engine.ps1`:
+
+```powershell
+.\scripts\check-swarm.ps1 -Go .\.tools\go\bin\go.exe -EngineSource <server directory from engine.ps1>
+```
+
+Это отдельная internal Docker-сеть с сидером и неизменённым production engine:
+префикс ровно 1 MiB из fixture 2 MiB. Synthetic public IPv4 и client /32 существуют
+только внутри тестовой сети; production flags/guard не меняются. Скрипт удаляет
+свои containers/network. Проверяются `.torrent`, cold HTTP magnet и cold UDP magnet.
+В MatriX.148-companion.4 публичный Sintel также передал по 1 MiB через `.torrent`
+и cold UDP magnet. Ubuntu HTTP tracker возвращает единственного пира, который
+объявляет доступным кусок из середины ISO; начальный префикс за 120 s не получен.
 
 ### Ручная приёмка LC-004 на Windows
 
@@ -222,7 +273,7 @@ PowerShell и встроенный curl. Portable Go можно распаков
 `sh scripts/engine.sh` и host через `sh scripts/build.sh`; Docker media recipe
 одинакова для обеих платформ.
 
-Engine — **MatriX.148-companion.1**, сборка из закреплённого MatriX.148, без GST.
+Engine — **MatriX.148-companion.4**, сборка из закреплённого MatriX.148, без GST.
 `cmd/patch-engine` применяет небольшие изменения с проверкой контекста к upstream
 и его `tsynik/torrent v1.2.34`, не изменяя module cache. SHA-256 источников, patch
 recipe/policy и готовых binaries находятся в lock; `go mod verify` проверяет
@@ -270,15 +321,18 @@ queue saturation/cancel, lock, cleanup, XDG и измеренные timeline anc
 
 В patched engine все raw HTTP routes требуют Basic auth, browser Origin запрещён.
 Peer TCP, HTTP trackers и metadata HTTP проверяют фактический адрес после DNS перед
-connect, в том числе при redirects. Разрешён только публичный IPv4 TCP; special-purpose
-адреса и локальные interface subnets запрещены. Proxy из settings/env, IPv6,
-UDP trackers, DHT, uTP, PEX, local discovery и port mapping отключены принудительно.
-Раздачи, которым нужен только UDP/DHT, могут не находить peers.
+connect, в том числе при redirects. Разрешён публичный IPv4 TCP; special-purpose
+адреса и локальные interface subnets запрещены. В `.4` UDP trackers используют
+отдельный connected IPv4 socket с той же проверкой фактического адреса до первой
+датаграммы и общим deadline 15 s, включая DNS/connect/announce. Ответы принимаются
+только от выбранного endpoint; отмена закрывает socket. Proxy из settings/env,
+IPv6, DHT, uTP, PEX, local discovery и port mapping отключены принудительно.
+Работа UDP tracker не гарантирует доступность TCP peers или metadata конкретной раздачи.
 
 Focused проверки LC-004: `go test ./build/engine ./internal/api ./internal/pairing
 ./internal/app ./internal/engine`; для последнего нужен `YANE_TEST_EXECUTABLE`.
 `scripts/engine.ps1` дополнительно проверяет реальные peer/tracker hooks upstream
-и невозможность включить DHT/uTP/proxy настройками. Сайт всё ещё не создаёт torrent
-sessions: validated locators/controllers относятся к следующим этапам.
+и невозможность включить DHT/uTP/proxy настройками. LC-005 добавляет отдельные
+локальные sessions/controllers, без playback/media capabilities.
 
 Лицензии и требования перед публикацией: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

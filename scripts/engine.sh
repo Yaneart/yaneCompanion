@@ -15,10 +15,12 @@ dependency=$(go -C "$source" list -m -f '{{.Replace.Dir}}' github.com/anacrolix/
 test "$(go -C "$source" list -m -f '{{.Replace.Version}}' github.com/anacrolix/torrent)" = v1.2.34
 test "$(go -C "$source" list -m -f '{{.Replace.Sum}}' github.com/anacrolix/torrent)" = 'h1:ptxsr0IA7kaoDV1x/lrVLmz8s7xQ+nYgGJBHQvwM6Ck='
 go run ./cmd/patch-engine -source "$source" -torrent "$dependency" -guard "$PWD/build/engine"
+engine_version=$(sed -n 's/.*"version": "\(MatriX[^"]*\)".*/\1/p' release/dependencies.lock.json)
+test -n "$engine_version"
 for target in windows linux; do
   suffix=; test "$target" != windows || suffix=.exe
   mkdir -p ".tools/engine/$target-amd64"
-  GOOS=$target go -C "$source" build -trimpath -buildvcs=false -mod=readonly '-ldflags=-buildid= -s -w -X server/version.Version=MatriX.148-companion.1' -o "$PWD/.tools/engine/$target-amd64/torrserver$suffix" ./cmd
+  GOOS=$target go -C "$source" build -trimpath -buildvcs=false -mod=readonly "-ldflags=-buildid= -s -w -X server/version.Version=$engine_version" -o "$PWD/.tools/engine/$target-amd64/torrserver$suffix" ./cmd
 done
-go -C "$source/companion-torrent" test -mod=readonly . ./tracker ./companionguard -run 'TestCompanion|TestSpecialAddresses|TestLocalSocketsNeverConnect|TestHTTPRedirectCannotReachPrivateService' -count=1
+go -C "$source/companion-torrent" test -mod=readonly . ./tracker ./companionguard -run 'TestCompanion|TestSpecialAddresses|TestTrackerSockets|TestLocalSocketsNeverConnect|TestHTTPRedirectCannotReachPrivateService' -count=1
 printf 'Patched engine sources: %s\n' "$source"

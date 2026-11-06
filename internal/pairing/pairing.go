@@ -58,6 +58,8 @@ type pending struct {
 }
 
 type Store struct {
+	// Set once before serving. The callback must not call back into this store.
+	OnRevoke  func(string)
 	mu        sync.Mutex
 	directory string
 	grants    []verifier
@@ -222,6 +224,21 @@ func (s *Store) Decide(id, code string, approve bool) error {
 func (s *Store) Authenticate(origin, token string) (Grant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.authenticate(origin, token)
+}
+
+// Serialize controller creation with revoke, including an approved-poll cancel.
+func (s *Store) UseGrant(origin, token string, use func(Grant) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	grant, err := s.authenticate(origin, token)
+	if err != nil {
+		return err
+	}
+	return use(grant)
+}
+
+func (s *Store) authenticate(origin, token string) (Grant, error) {
 	if !validHex(token, 32) {
 		return Grant{}, ErrRequired
 	}
@@ -279,6 +296,9 @@ func (s *Store) revoke(id string) error {
 		return err
 	}
 	s.grants = grants
+	if s.OnRevoke != nil {
+		s.OnRevoke(id)
+	}
 	for _, p := range s.requests {
 		if p.grantID == id {
 			p.token, p.state = "", "denied"

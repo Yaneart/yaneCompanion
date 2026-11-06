@@ -18,10 +18,9 @@ import (
 	"time"
 
 	"yanecompanion/internal/lifecycle"
+	"yanecompanion/internal/locator"
 	"yanecompanion/release"
 )
-
-var ErrAdmissionClosed = errors.New("UNSUPPORTED_CAPABILITY")
 
 type Engine struct {
 	process           *lifecycle.Process
@@ -29,9 +28,20 @@ type Engine struct {
 	address, password string
 }
 
-// Pairing does not implement sessions. Keep website torrent admission closed
-// until validated locators and controller ownership are implemented.
-func (e *Engine) Admit(context.Context, []byte) error { return ErrAdmissionClosed }
+// Only validated input reaches this private adapter; HTTP ownership lives in sessions.
+func (e *Engine) Admit(ctx context.Context, input locator.Input) error {
+	if !input.Valid() {
+		return locator.ErrUnsafe
+	}
+	// Settle this private mutation before a cancellation can drop/reuse its hash.
+	mutation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	if err := e.admit(mutation, input); err != nil {
+		e.process.Stop() // A lost engine response must never leave an unowned torrent.
+		return err
+	}
+	return nil
+}
 
 func Start(ctx context.Context, executable, directory string) (*Engine, error) {
 	var secret [32]byte

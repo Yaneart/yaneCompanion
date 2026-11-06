@@ -13,7 +13,7 @@ import (
 
 var ErrDenied = errors.New("COMPANION_EGRESS_DENIED")
 
-// v1 deliberately supports public IPv4 TCP only. Deny special-purpose space,
+// Only public IPv4 destinations are allowed. Deny special-purpose space,
 // including globally reachable exceptions, rather than making private-network
 // access depend on tracker URLs, DNS answers, redirects or settings files.
 var reserved = [...]netip.Prefix{
@@ -44,7 +44,14 @@ func Public(address string) bool {
 // Control runs after DNS resolution and immediately before connect, for every
 // attempted address. The kernel receives exactly the address checked here.
 func Control(network, address string, _ syscall.RawConn) error {
-	if (network != "tcp4" && network != "tcp") || !Public(address) {
+	if network != "tcp4" && network != "tcp" {
+		return ErrDenied
+	}
+	return destination(address)
+}
+
+func destination(address string) error {
+	if !Public(address) {
 		return ErrDenied
 	}
 	interfaces, err := net.InterfaceAddrs()
@@ -62,6 +69,19 @@ func Control(network, address string, _ syscall.RawConn) error {
 }
 
 func Dialer() *net.Dialer { return &net.Dialer{Timeout: 15 * time.Second, Control: Control} }
+
+// Connected tracker sockets check the resolved destination before the first
+// datagram and accept replies only from that endpoint. Peer UDP stays disabled.
+func TrackerDialer() *net.Dialer {
+	return &net.Dialer{Timeout: 15 * time.Second, Control: trackerControl}
+}
+
+func trackerControl(network, address string, _ syscall.RawConn) error {
+	if network != "udp4" {
+		return ErrDenied
+	}
+	return destination(address)
+}
 
 // Install replaces environment proxy discovery as well as the default dialer.
 // Redirects are processed normally, but each new socket rechecks its address.

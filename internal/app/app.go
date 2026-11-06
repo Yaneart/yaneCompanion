@@ -20,6 +20,7 @@ import (
 	"yanecompanion/internal/engine"
 	"yanecompanion/internal/lifecycle"
 	"yanecompanion/internal/pairing"
+	localsessions "yanecompanion/internal/sessions"
 	"yanecompanion/release"
 )
 
@@ -102,6 +103,9 @@ func Run(ctx context.Context, options Options) (result error) {
 		return err
 	}
 	defer worker.Close()
+	admissions := localsessions.New(worker)
+	defer admissions.Close()
+	pairings.OnRevoke = admissions.Revoke
 	controlPath := filepath.Join(options.Paths.State, "control.json")
 	control, _ := json.Marshal(map[string]string{"token": localToken, "bootId": boot})
 	temporary, err := os.CreateTemp(options.Paths.State, ".control-")
@@ -131,7 +135,7 @@ func Run(ctx context.Context, options Options) (result error) {
 	}
 	defer os.Remove(controlPath)
 	stop := make(chan struct{}, 1)
-	server := &http.Server{Handler: api.Handler{BootID: boot, LocalToken: localToken, Origins: options.Origins, DevelopmentOrigin: options.DevelopmentOrigin, Stop: stop, Pairings: pairings, Management: &api.Management{}}, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10}
+	server := &http.Server{Handler: api.Handler{BootID: boot, LocalToken: localToken, Origins: options.Origins, DevelopmentOrigin: options.DevelopmentOrigin, Stop: stop, Pairings: pairings, Management: &api.Management{}, Sessions: admissions}, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	defer server.Close()
@@ -150,12 +154,15 @@ func Run(ctx context.Context, options Options) (result error) {
 			return server.Shutdown(shutdown)
 		case <-worker.Done():
 			return errors.New("ENGINE_UNAVAILABLE")
+		case err := <-admissions.Errors():
+			return err
 		case err := <-serveErr:
 			if errors.Is(err, http.ErrServerClosed) {
 				return nil
 			}
 			return errors.New("HTTP_UNAVAILABLE")
 		case <-monitor.C:
+			admissions.Tick()
 			if err := sessions.Check(); err != nil {
 				return err
 			}

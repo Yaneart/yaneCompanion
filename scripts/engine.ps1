@@ -36,7 +36,7 @@ foreach ($target in @('windows','linux')) {
   if ($LASTEXITCODE -ne 0) { throw "Engine build failed: $target" }
 }
 $env:GOOS = 'windows'
-& $Go -C (Join-Path $engineSource 'companion-torrent') test -mod=readonly . ./tracker ./companionguard -run 'TestCompanion|TestSpecialAddresses|TestLocalSocketsNeverConnect|TestHTTPRedirectCannotReachPrivateService' -count=1
+& $Go -C (Join-Path $engineSource 'companion-torrent') test -mod=readonly . ./tracker ./companionguard -run 'TestCompanion|TestSpecialAddresses|TestTrackerSockets|TestLocalSocketsNeverConnect|TestHTTPRedirectCannotReachPrivateService' -count=1
 if ($LASTEXITCODE -ne 0) { throw 'Engine policy tests failed' }
 Write-Output "Patched engine sources: $engineSource"
 Write-Output 'Engine binaries built. Verify hashes against release/dependencies.lock.json before assembly.'

@@ -115,7 +115,7 @@ func TestRuntimeLifecycle(t *testing.T) {
 	for _, tc := range []struct {
 		method, path, origin string
 		status               int
-	}{{"GET", "/hello", "https://watch.example", 200}, {"GET", "/hello", "https://evil.example", 403}, {"POST", "/v1/sessions", "https://watch.example", 404}, {"POST", "/local/exit", "https://watch.example", 403}} {
+	}{{"GET", "/hello", "https://watch.example", 200}, {"GET", "/hello", "https://evil.example", 403}, {"POST", "/v1/sessions", "https://watch.example", 401}, {"POST", "/local/exit", "https://watch.example", 403}} {
 		req, _ := http.NewRequest(tc.method, "http://"+config.Address+tc.path, nil)
 		req.Header.Set("Origin", tc.origin)
 		res, err := client.Do(req)
@@ -124,6 +124,9 @@ func TestRuntimeLifecycle(t *testing.T) {
 		}
 		data, _ := io.ReadAll(res.Body)
 		res.Body.Close()
+		if tc.path == "/hello" && res.StatusCode == 200 && (!strings.Contains(string(data), "torrent-admission.v1") || strings.Contains(string(data), "sessions.v1")) {
+			t.Fatal("hello advertises incorrect admission/playback capabilities")
+		}
 		if res.StatusCode != tc.status {
 			t.Fatalf("%s %s: %d %s", tc.method, tc.path, res.StatusCode, data)
 		}

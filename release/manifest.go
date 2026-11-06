@@ -16,7 +16,7 @@ import (
 var locked []byte
 
 const Version = "0.1.0-dev"
-const EngineVersion = "MatriX.148-companion.1"
+const EngineVersion = "MatriX.148-companion.4"
 const MediaVersion = "9.0.2"
 
 type Artifact struct {

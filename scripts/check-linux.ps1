@@ -8,7 +8,7 @@ $suitePath = Join-Path $projectRoot 'dist\linux-amd64'
 $runnerPath = Join-Path $projectRoot 'test\linux.sh'
 $checks = Join-Path $suitePath 'checks'
 New-Item -ItemType Directory -Force -Path $checks | Out-Null
-foreach ($package in @('internal/config','internal/lifecycle','internal/cache','internal/jobs','internal/media','internal/engine','internal/api','internal/pairing','build/engine','test/runtime')) {
+foreach ($package in @('internal/config','internal/lifecycle','internal/cache','internal/jobs','internal/media','internal/engine','internal/api','internal/pairing','internal/locator','internal/sessions','build/engine','test/runtime')) {
   & $Go -C $projectRoot test -c -o (Join-Path $checks ($package.Replace('/','-') + '.test')) ('./' + $package)
   if ($LASTEXITCODE -ne 0) { throw "Test compilation failed: $package" }
 }

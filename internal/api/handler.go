@@ -13,6 +13,7 @@ import (
 
 	"yanecompanion/internal/config"
 	"yanecompanion/internal/pairing"
+	"yanecompanion/internal/sessions"
 	"yanecompanion/release"
 )
 
@@ -23,6 +24,7 @@ type Handler struct {
 	Stop               chan<- struct{}
 	Pairings           *pairing.Store
 	Management         *Management
+	Sessions           *sessions.Manager
 }
 
 func ValidOrigin(origin string) bool {
@@ -64,50 +66,79 @@ func bearer(r *http.Request) string {
 }
 
 func jsonBody(w http.ResponseWriter, r *http.Request, value any) bool {
+	_, ok := readJSON(w, r, value, 1024)
+	return ok
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, value any, limit int64) ([]byte, bool) {
 	typeName, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || typeName != "application/json" || len(r.Header.Values("Content-Type")) != 1 {
 		fail(w, 415, "JSON_REQUIRED")
-		return false
+		return nil, false
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024))
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		fail(w, 413, "INPUT_TOO_LARGE")
+		return nil, false
+	}
 	if err != nil || !uniqueObject(data) {
 		fail(w, 400, "INVALID_REQUEST")
-		return false
+		return nil, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(value) != nil || decoder.Decode(new(any)) != io.EOF {
 		fail(w, 400, "INVALID_REQUEST")
-		return false
+		return nil, false
 	}
-	return true
+	return data, true
 }
 
 // Reject duplicate keys and non-object JSON before decoding consent decisions.
 func uniqueObject(data []byte) bool {
 	d := json.NewDecoder(bytes.NewReader(data))
-	start, err := d.Token()
-	if err != nil || start != json.Delim('{') {
-		return false
-	}
-	seen := map[string]bool{}
-	for d.More() {
-		key, err := d.Token()
+	var walk func(int, bool) bool
+	walk = func(depth int, root bool) bool {
+		if depth > 32 {
+			return false
+		}
+		token, err := d.Token()
 		if err != nil {
 			return false
 		}
-		name, ok := key.(string)
-		name = strings.ToLower(name)
-		if !ok || seen[name] {
+		delim, compound := token.(json.Delim)
+		if !compound {
+			return !root
+		}
+		if root && delim != '{' {
 			return false
 		}
-		seen[name] = true
-		if d.Decode(new(json.RawMessage)) != nil {
+		if delim != '{' && delim != '[' {
 			return false
 		}
+		seen := map[string]bool{}
+		for d.More() {
+			if delim == '{' {
+				key, err := d.Token()
+				if err != nil {
+					return false
+				}
+				name, ok := key.(string)
+				name = strings.ToLower(name)
+				if !ok || seen[name] {
+					return false
+				}
+				seen[name] = true
+			}
+			if !walk(depth+1, false) {
+				return false
+			}
+		}
+		end, err := d.Token()
+		return err == nil && (delim == '{' && end == json.Delim('}') || delim == '[' && end == json.Delim(']'))
 	}
-	end, err := d.Token()
-	return err == nil && end == json.Delim('}') && d.Decode(new(any)) == io.EOF
+	return walk(0, true) && d.Decode(new(any)) == io.EOF
 }
 
 func pairError(w http.ResponseWriter, err error) {
@@ -173,11 +204,22 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.Pairings != nil {
 			capabilities = append(capabilities, "pairing.v1")
 		}
+		if h.Sessions != nil {
+			capabilities = append(capabilities, "torrent-admission.v1", "torrent-files.v1")
+		}
 		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "api": map[string]int{"major": 1, "minor": 0}, "bootId": h.BootID, "capabilities": capabilities})
 		return
 	}
 	if h.Pairings == nil {
 		fail(w, 404, "NOT_FOUND")
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/v1/controllers") || strings.HasPrefix(r.URL.Path, "/v1/sessions") || strings.HasPrefix(r.URL.Path, "/v1/operations") {
+		if h.Sessions == nil {
+			fail(w, 404, "NOT_FOUND")
+			return
+		}
+		h.sessionAPI(w, r, origin)
 		return
 	}
 	if r.URL.Path == "/v1/pairings" {
@@ -237,6 +279,9 @@ func routeMethods(path string) string {
 	case "/v1/pairings/current":
 		return "GET,DELETE"
 	}
+	if methods := sessionMethods(path); methods != "" {
+		return methods
+	}
 	if strings.HasPrefix(path, "/v1/pairings/") && len(strings.TrimPrefix(path, "/v1/pairings/")) == 32 {
 		return "GET,DELETE"
 	}
@@ -252,14 +297,14 @@ func preflight(w http.ResponseWriter, r *http.Request, methods string) {
 	}
 	for _, line := range r.Header.Values("Access-Control-Request-Headers") {
 		for _, header := range strings.Split(line, ",") {
-			if header = strings.ToLower(strings.TrimSpace(header)); header != "authorization" && header != "content-type" {
+			if header = strings.ToLower(strings.TrimSpace(header)); header != "authorization" && header != "content-type" && header != "idempotency-key" && header != "if-match" {
 				fail(w, 403, "PREFLIGHT_DENIED")
 				return
 			}
 		}
 	}
 	w.Header().Set("Access-Control-Allow-Methods", strings.ReplaceAll(methods, ",", ", "))
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, If-Match")
 	w.WriteHeader(204)
 }
 
@@ -278,7 +323,7 @@ func (h Handler) local(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/local/status" && r.Method == "GET":
-		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "bootId": h.BootID, "admission": false})
+		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "bootId": h.BootID, "admission": h.Sessions != nil, "playback": false})
 	case r.URL.Path == "/local/exit" && r.Method == "POST":
 		w.WriteHeader(202)
 		select {

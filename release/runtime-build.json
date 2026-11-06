@@ -1,12 +1,12 @@
 {
-  "helperVersion": "0.1.0-dev",
-  "toolchain": "go1.27.3",
-  "sourceCommit": null,
-  "developmentBundle": true,
-  "repeatedBuildIdentical": true,
-  "inputLockSHA256": "831a523dd6d14b6574ce411108afc1bc7cc58a16bcafb376133988a02005ae54",
-  "platformSHA256": {
-    "windows-amd64": "ab3eca9c0d152f6c947d9a1f7481ff0653fd820974a7b6dfe30c50d6cd5ccd7f",
-    "linux-amd64": "d968262500b2ce62968b194ab944d42bcc784076fc3fcd4ffb7926abc0d1d10c"
-  }
+    "helperVersion":  "0.1.0-dev",
+    "toolchain":  "go1.27.3",
+    "sourceCommit":  null,
+    "developmentBundle":  true,
+    "repeatedBuildIdentical":  true,
+    "inputLockSHA256":  "48257e777fb895364619e2ab43df2252f00cf3986060346616be04a5c1108b5c",
+    "platformSHA256":  {
+                           "windows-amd64":  "8415e07e68a4739d77791a48d6d4112cd98ce86438bd0ba4a02bf1d554b2d441",
+                           "linux-amd64":  "0bfe125afd638e87ad0b93bf76fccf30ce36ae3284bb9671cdfc7dc038c69547"
+                       }
 }

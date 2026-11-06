@@ -1,5 +1,91 @@
 # Проверки и границы runtime
 
+## LC-005 — локальный приём раздачи (2026-11-06)
+
+Дополнение Internet/UDP, MatriX.148-companion.4 (2026-11-06):
+
+- Connected IPv4 UDP tracker sockets используют тот же destination guard после DNS
+  до первой отправки; private/special-purpose/local interface subnets запрещены.
+  Весь exchange ограничен 15 s; отмена закрывает socket. DHT/uTP/PEX, IPv6,
+  local discovery, proxy и port mapping остаются отключены.
+- Windows guard tests и скопированные upstream tracker/socket/metadata tests PASS,
+  включая localhost/private/IPv6 denial и cancellation. Guard tests также PASS
+  в Debian non-root/read-only/network-none. Bundled raw-auth/late-stream regression PASS.
+- Windows/Linux engines из двух свежих source extractions совпали побайтно;
+  оба host targets повторно совпали. Lock, source recipe и build proofs обновлены.
+  Полный аудит обоих bundle подтвердил каждый artifact/patch hash; в source recipe
+  добавлен пропущенный `scripts/assemble.ps1`, необходимый для проверки rebuild lock.
+- Настоящий Sintel из Интернета: `.torrent` и cold UDP magnet получили по
+  1 048 576 bytes. Тест выбирает самый большой файл: первый в этом multi-file
+  torrent — крошечные субтитры. Webseeds/WSS удалены только из test fixture;
+  info dictionary/hash сохранён, production validator не менялся.
+- Isolated Linux swarm PASS: `.torrent`, cold HTTP magnet, cold UDP magnet —
+  по 1 MiB. Synthetic addresses и client /32 остаются только внутри internal network.
+- Playwright с настоящими Public localhost:5173/backend:3000 и Windows helper:
+  Sintel cold UDP magnet и Frieren SubsPlease S2-09 из реального поиска — список
+  файлов, явный выбор видео, по 1 048 576 bytes. Без mocks, CORS/permission overrides.
+  Прямой upload Sintel `.torrent` также получил 1 MiB; stop очистил picker,
+  controller DELETE и отзыв временного pairing вернули 204. Обычный grant сохранён.
+- Исходная Knaben AMB3R остаётся без metadata: 6 UDP trackers ответили и вернули
+  peers, проверенные TCP endpoints не завершили handshake (timeout/EOF).
+  Успех этой раздачи не заявляется. Ubuntu HTTPS tracker отвечает, но единственный
+  пир объявляет кусок из середины ISO; начальный префикс не получен за 120 s.
+- Диагностические файлы, snapshots и screenshots удалены по запросу пользователя 2026-11-06; результаты проверок сохранены в этом документе.
+  Ни LC-005, ни LC-006 автоматически не закрывались/начинались.
+
+Ниже сохранены результаты предыдущих проверок `.3` и основы LC-004.
+
+Реализация подготовлена; ручная приёмка и новые пользовательские коммиты ещё ожидаются.
+Go сохранён по решению пользователя. Полный контракт —
+[companion](../../yaneMedia/docs/companion.md#реализованная-граница-lc-005).
+
+- Focused Windows checks: locator/session/API/pairing/engine, startup compilation и
+  bundled raw-auth test. Проверены строгий ввод, ownership, replay до CAS, отмена
+  revision 1, lease/revoke и отсутствие поздней публикации; heartbeat касается
+  только metadata своей idle session и не запускает piece download.
+- Debian/Ubuntu/Arch containers: изменённые packages, raw-auth и targeted app lifecycle проходят с network
+  none/read-only/non-root. Это Linux userspaces, не native desktop acceptance.
+- Настоящий MatriX.148-companion.3 в isolated internal Docker swarm: `.torrent`
+  и cold magnet получают ровно 1 MiB из fixture 2 MiB, затем Drop. Peer metadata
+  проходит тот же validator до storage. В тесте нет Internet egress; synthetic IPv4
+  и client /32 находятся только в test namespace. Production engine/guard/args не
+  изменяются; helper API не предоставляет сетевой test mode.
+- Публичные Ubuntu swarms не дали bytes за deadline 120 s: старый torrent отклонён
+  tracker, актуальный даёт пира без отдачи. Это не PASS Internet swarm delivery.
+- Backend: 114 focused tests discovery/catalogs/input/security, включая отдельный
+  `TorrentDiscoveryModule` без TorrServer/FFmpeg, guest/account isolation, CSRF,
+  rate/concurrency и недопущение provider passkeys в locators.
+- Frontend: 44 focused tests — отдельные `test:companion` DOM processes, discovery boundary/sorting/
+  mode resolution и Home view lifecycle; focused TypeScript/lint/format.
+  Общий процесс для нескольких happy-dom registrations не используется, как и в
+  существующем `test:torrent` script.
+- Настоящий Public Vite preview localhost:5174 → helper в отдельном test profile:
+  pairing, manual metainfo, два файла, stop. Empty/stale discovery — browser
+  fixtures; CORS read-only API текущего Home backend подставлен тестом. Browser
+  permissions не переопределялись. На 375 px нет горизонтального overflow.
+- Engine пересобран дважды из свежих pinned sources; Windows/Linux SHA-256
+  совпали и обновлены в lock. Повторные host builds фиксируются в runtime-build.json.
+
+Focused повтор: `go test ./internal/locator ./internal/sessions ./internal/api
+./internal/pairing ./internal/engine ./internal/app`. Для raw auth задать
+`YANE_TEST_EXECUTABLE`. Для deterministic peer transfer: `scripts/check-swarm.ps1
+-Go <portable go.exe> -EngineSource <server path from scripts/engine.ps1>`.
+Скрипт удаляет только собственные test containers/network; scratch остаётся в `.tools`.
+Ни один полный project suite/build не требуется для этого focused прогона.
+Native целевых ОС, HTTPS/LNA, player/media и длительный playback остаются LC-014.
+
+Независимая повторная проверка LC-005 (2026-11-06) выявила два исправленных
+дефекта: зависшее pending после `pagehide` во frontend и повторный admission из
+запоздавшего `/stream` после Drop. В `.3` `/stream` возвращает 404 для отсутствующей
+или оставшейся только в DB раздачи. Bundled regression проверяет активную playlist
+(200), затем Drop, запоздавший stream (404) и отсутствие hash в списке.
+Новый тест падал на `.2`; на `.3` проходит в Windows и Debian/Ubuntu/Arch containers.
+Engine и host повторно собраны побайтно одинаково; `.torrent` и cold magnet снова
+передали по 1 MiB в isolated swarm. Browser preview и публичные Internet swarms
+в этой повторной проверке не запускались. Ручная приёмка и коммиты ещё ожидаются.
+
+## Предыдущая принятая основа
+
 LC-003 реализует минимальный runtime. Код зафиксирован и опубликован пользователем
 в коммите `0c8d2b82b4388f89702858c0a5fdb567efeb4312`; совпадение с `main` на origin
 проверено. **LC-003 принят и закрыт 2026-11-05** по явному согласию пользователя:

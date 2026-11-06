@@ -15,6 +15,7 @@ import (
 
 	"yanecompanion/internal/engine"
 	"yanecompanion/internal/locator"
+	"yanecompanion/internal/media"
 )
 
 type Backend interface {
@@ -38,13 +39,16 @@ type File struct {
 	Size int64  `json:"size"`
 }
 type Snapshot struct {
-	ID         string `json:"sessionId"`
-	Revision   int    `json:"revision"`
-	State      string `json:"state"`
-	Files      []File `json:"files"`
-	Selected   string `json:"selectedFileRef,omitempty"`
-	Downloaded int64  `json:"downloadedBytes"`
-	Error      string `json:"error,omitempty"`
+	ID         string        `json:"sessionId"`
+	Revision   int           `json:"revision"`
+	State      string        `json:"state"`
+	Files      []File        `json:"files"`
+	Selected   string        `json:"selectedFileRef,omitempty"`
+	Downloaded int64         `json:"downloadedBytes"`
+	Error      string        `json:"error,omitempty"`
+	Probe      *media.Probe  `json:"probe,omitempty"`
+	Target     *media.Target `json:"target,omitempty"`
+	Source     *Source       `json:"source,omitempty"`
 }
 type Admission struct {
 	OperationID string `json:"operationId"`
@@ -70,16 +74,20 @@ type controller struct {
 	sessions          map[string]*session
 }
 type session struct {
-	snapshot     Snapshot
-	owner        *controller
-	hash         string
-	files        map[string]engine.File
-	cancel       context.CancelFunc
-	done         chan struct{}
-	pending      string
-	selectCancel context.CancelFunc
-	selecting    bool
-	selectDone   chan struct{}
+	ctx                 context.Context
+	playback            *media.Playback
+	readGrant, sourceID string
+	sourceRevision      int
+	snapshot            Snapshot
+	owner               *controller
+	hash                string
+	files               map[string]engine.File
+	cancel              context.CancelFunc
+	done                chan struct{}
+	pending             string
+	selectCancel        context.CancelFunc
+	selecting           bool
+	selectDone          chan struct{}
 }
 type Manager struct {
 	mu          sync.Mutex
@@ -88,6 +96,7 @@ type Manager struct {
 	active      *session
 	now         func() time.Time
 	fatal       chan error
+	media       *media.Service
 }
 type Controller struct {
 	ID        string    `json:"controllerId"`
@@ -100,6 +109,12 @@ var uuid = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-
 func New(backend Backend) *Manager {
 	return &Manager{backend: backend, controllers: map[[32]byte]*controller{}, now: time.Now, fatal: make(chan error, 1)}
 }
+func NewWithMedia(backend Backend, service *media.Service) *Manager {
+	m := New(backend)
+	m.media = service
+	return m
+}
+func (m *Manager) MediaEnabled() bool   { return m.media != nil }
 func (m *Manager) Errors() <-chan error { return m.fatal }
 func secret(n int) string               { return hex.EncodeToString(random(n)) }
 func random(n int) []byte {
@@ -140,7 +155,7 @@ func (m *Manager) Heartbeat(origin, token string) (time.Time, error) {
 	c.expires = m.now().Add(180 * time.Second)
 	expires := c.expires
 	s := m.active
-	keepAlive := s != nil && s.owner == c && s.snapshot.State == "awaiting_file"
+	keepAlive := s != nil && s.owner == c && (s.snapshot.State == "awaiting_file" || s.snapshot.State == "awaiting_target" || s.snapshot.State == "ready")
 	m.mu.Unlock()
 	if keepAlive {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -193,7 +208,14 @@ func (m *Manager) Revoke(grant string) {
 		}
 	}
 }
-func (m *Manager) Tick() { m.mu.Lock(); defer m.mu.Unlock(); m.prune() }
+func (m *Manager) Tick() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prune()
+	if m.active != nil {
+		m.updatePlayback(m.active)
+	}
+}
 func (m *Manager) prune() {
 	for _, c := range m.controllers {
 		if !m.now().Before(c.expires) {
@@ -264,7 +286,7 @@ func (m *Manager) Create(origin, token, key string, body []byte, l locator.Locat
 		return Admission{}, denied(429, "RESOURCE_LIMIT")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &session{snapshot: Snapshot{ID: secret(16), Revision: 1, State: "metadata", Files: []File{}}, owner: c, hash: input.Hash(), files: map[string]engine.File{}, cancel: cancel, done: make(chan struct{}), pending: key}
+	s := &session{ctx: ctx, snapshot: Snapshot{ID: secret(16), Revision: 1, State: "metadata", Files: []File{}}, owner: c, hash: input.Hash(), files: map[string]engine.File{}, cancel: cancel, done: make(chan struct{}), pending: key}
 	m.active = s
 	c.sessions[s.snapshot.ID] = s
 	r.admission = Admission{key, s.snapshot.ID, 1, "metadata"}
@@ -330,6 +352,15 @@ func (m *Manager) load(ctx context.Context, s *session, input locator.Input) {
 	if downloadDone != nil {
 		<-downloadDone
 	}
+	m.mu.Lock()
+	playback := s.playback
+	s.playback = nil
+	s.readGrant = ""
+	s.snapshot.Source = nil
+	m.mu.Unlock()
+	if playback != nil {
+		playback.Close()
+	}
 	// A cancelled engine POST may still complete remotely. Drop after it settles,
 	// retaining device ownership throughout cleanup so a replacement cannot race.
 	cleanup, finish := context.WithTimeout(context.Background(), 5*time.Second)
@@ -368,6 +399,7 @@ func (m *Manager) Snapshot(origin, token, id string) (Snapshot, error) {
 	if s == nil {
 		return Snapshot{}, denied(404, "NOT_FOUND")
 	}
+	m.updatePlayback(s)
 	result := s.snapshot
 	result.Files = append([]File{}, s.snapshot.Files...)
 	return result, nil
@@ -397,6 +429,8 @@ func (m *Manager) stop(s *session) {
 		return
 	}
 	s.snapshot.State = "stopping"
+	s.snapshot.Source = nil
+	s.readGrant = ""
 	s.cancel()
 	if s.selectCancel != nil {
 		s.selectCancel()
@@ -445,6 +479,21 @@ func (m *Manager) Cancel(origin, token, key string, revision int) error {
 		return denied(409, "REVISION_CONFLICT")
 	}
 	s.snapshot.Revision++
+	if m.media != nil && (s.snapshot.State == "probing" || s.snapshot.State == "preparing") {
+		if s.selectCancel != nil {
+			s.selectCancel()
+		}
+		if s.snapshot.State == "probing" {
+			s.snapshot.State = "awaiting_file"
+		} else {
+			s.snapshot.State = "awaiting_target"
+		}
+		s.pending = ""
+		s.snapshot.Source = nil
+		s.readGrant = ""
+		r.operation.State = "cancelled"
+		return nil
+	}
 	m.stop(s)
 	return nil
 }

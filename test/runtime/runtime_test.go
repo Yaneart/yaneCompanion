@@ -124,7 +124,7 @@ func TestRuntimeLifecycle(t *testing.T) {
 		}
 		data, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if tc.path == "/hello" && res.StatusCode == 200 && (!strings.Contains(string(data), "torrent-admission.v1") || strings.Contains(string(data), "sessions.v1")) {
+		if tc.path == "/hello" && res.StatusCode == 200 && (!strings.Contains(string(data), "torrent-admission.v1") || !strings.Contains(string(data), "sessions.v1") || !strings.Contains(string(data), "hls.mse") || !strings.Contains(string(data), "timeline.windowed-vod")) {
 			t.Fatal("hello advertises incorrect admission/playback capabilities")
 		}
 		if res.StatusCode != tc.status {

@@ -1,6 +1,77 @@
 # Проверки и границы runtime
 
+## LC-006 — локальный media API (2026-11-06)
+
+Реализован по команде пользователя; пользовательская приёмка и коммит ещё предстоят.
+Обычный Public UI сохраняет LC-005 picker. App adapter — LC-008, LC-007 не начат.
+
+- Focused Windows: media/session/API/engine contracts и bundled runtime lifecycle.
+  Настоящие ffprobe/FFmpeg проверяют непрерывный 96 s H.264 fixture, ready prefix,
+  pause/backpressure при целиком buffered входе, продолжение далее 45 s, eviction,
+  успешный absolute EOF/ENDLIST, seek к measured GOP и очистку source.
+- PCM→AAC stereo проверен настоящим encode/probe/decode при неизменённом H.264.
+  Numeric AVProfile values pinned `--enable-small` build учтены; 1440p/4K/HDR guards
+  сохраняют исходный video и требуют browser MIME. Фактический 4K/HDR playback на
+  целевом железе не проверялся; video SDR encoders/hardware acceleration не объявлены.
+- API: probe перед configure, replay до CAS, отмена pending probe без остановки
+  session и без late publish, source id/revision, отдельный read grant, точный Origin,
+  отказ wrong bearer/Range/query/path, HEAD, old-grant 404 при replacement/revoke.
+- Debian bookworm контейнер: те же реальные continuous/audio fixtures и media API/
+  cancel checks PASS с network none, read-only, UID 65534, без capabilities.
+  Это Linux userspace, не native desktop/install acceptance.
+- Настоящий Internet Sintel (исходный info/hash, только test outer WSS/webseeds
+  удалены): probe + ready + decode video/audio в 0 s и 63.3 s. Anchor второго
+  source 62.25 s, mediaAnchor 0.083333 s; сохранены H.264 1024x436 и AAC 6 channels.
+- Playwright: изолированный helper profile, обычное локальное подтверждение pairing,
+  установленный registry `@yaneart/yaneplayer 0.1.18`, strict MSE/omit/redirect error.
+  Без browser routes, permission/CORS overrides или подмены torrent/media. Sintel
+  непрерывно прошёл 264 s с одной revision, pause не изменила позицию; seek 63.3 s
+  сохранил paused intent и rate 2, old read URL вернул 404. Stop/revoke закрыли grant.
+- MatriX.148-companion.4, его guard, media tool binaries, зависимости и lock не
+  изменены. Windows/Linux host bundles повторно собираются; hashes в runtime proof.
+- Не проверены native Windows 11/Debian/Ubuntu/Arch, новый HTTPS/LNA прогон,
+  полный app player adapter и 30 min просмотр. Native/HTTPS/длинная приёмка — LC-014.
+- Один независимый tester: PASS после исправления P1 startup stall. Его unchanged
+  воспроизведение с двумя fragments по 25 MiB раньше останавливалось на 4 s без ready;
+  теперь ready доступен по реальному префиксу. Permanent regressions также проверяют
+  `RESOURCE_LIMIT` до недоступной seek-позиции и сохранение initial decoder chain до
+  confirmed progress. Open responses pinning проверен отдельно для Windows eviction.
+  Дополнительно tester выполнил три запуска настоящего короткого 1 s фильма и
+  финальный `TestRuntimeLifecycle` на готовой Windows-сборке — PASS.
+- Финальные Windows/Linux host builds повторены побайтно; runtime proof и lock
+  сверены с готовыми executables. Последний browser pass на финальном bundle:
+  настоящий кадр Sintel, seek 63.3 s, `video.mode=copy`, AAC 6ch copy, revoke→404.
+- По отдельному запросу пользователя 2026-11-06 удалены временные каталоги
+  `.tools/lc006-review/`, `.tools/lc006-tester-repro/` и
+  `../yaneMedia/.playwright-mcp/`. Исходники и основные файлы Windows/Linux bundles
+  до/после совпали по 1021 SHA-256; ready dist, зависимости и build caches сохранены.
+  Старые scratch paths/Internet fixture отсутствуют; для `TestTorrentMedia` нужна
+  новая проверенная локальная `.torrent` fixture. Первоначальный отказ удаления
+  снят отдельным разрешённым запуском вне sandbox; обходов не использовалось.
+  Тестовые grants отозваны, helper/private engine и локальный стенд остановлены;
+  обычный пользовательский профиль и Docker services проекта не менялись.
+
+Повторение focused checks:
+
+```powershell
+$env:YANE_TEST_EXECUTABLE = (Resolve-Path .\dist\windows-amd64\yanecompanion.exe).Path
+.\.tools\go\bin\go.exe test ./internal/media ./internal/sessions ./internal/api ./internal/engine
+.\.tools\go\bin\go.exe test ./test/runtime -run TestRuntimeLifecycle
+# Только при наличии проверенного .torrent и доступных peers:
+$env:YANE_TEST_TORRENT = 'C:\path\to\fixture.torrent'
+.\.tools\go\bin\go.exe test ./internal/media -run TestTorrentMedia -v
+```
+
+Ниже — историческая приёмка LC-005; «LC-006 не начат» описывает тот checkpoint.
+
 ## LC-005 — локальный приём раздачи (2026-11-06)
+
+LC-005 принят пользователем и закрыт 2026-11-06 после браузерных проверок и
+подтверждения пользовательских коммитов: yaneMedia `9c2d4b9`, yaneCompanion `f2a8772`.
+LC-006 ещё не начат. Проверки подтверждают локальную загрузку, без playback;
+ограничения конкретных раздач и обязательная native/HTTPS-приёмка остаются ниже.
+После приёмки помощник и его приватный engine штатно остановлены; слушающих
+процессов на проверенных портах проекта нет. Docker остановлен пользователем.
 
 Дополнение Internet/UDP, MatriX.148-companion.4 (2026-11-06):
 
@@ -31,11 +102,11 @@
   Успех этой раздачи не заявляется. Ubuntu HTTPS tracker отвечает, но единственный
   пир объявляет кусок из середины ISO; начальный префикс не получен за 120 s.
 - Диагностические файлы, snapshots и screenshots удалены по запросу пользователя 2026-11-06; результаты проверок сохранены в этом документе.
-  Ни LC-005, ни LC-006 автоматически не закрывались/начинались.
+  LC-006 не начат; следующий этап выполняется по отдельной команде пользователя.
 
 Ниже сохранены результаты предыдущих проверок `.3` и основы LC-004.
 
-Реализация подготовлена; ручная приёмка и новые пользовательские коммиты ещё ожидаются.
+Эта проверенная рабочая копия вошла в подтверждённые коммиты LC-005.
 Go сохранён по решению пользователя. Полный контракт —
 [companion](../../yaneMedia/docs/companion.md#реализованная-граница-lc-005).
 
@@ -82,7 +153,7 @@ Native целевых ОС, HTTPS/LNA, player/media и длительный play
 Новый тест падал на `.2`; на `.3` проходит в Windows и Debian/Ubuntu/Arch containers.
 Engine и host повторно собраны побайтно одинаково; `.torrent` и cold magnet снова
 передали по 1 MiB в isolated swarm. Browser preview и публичные Internet swarms
-в этой повторной проверке не запускались. Ручная приёмка и коммиты ещё ожидаются.
+в этой повторной проверке не запускались; Internet/Playwright результаты .4 приведены выше.
 
 ## Предыдущая принятая основа
 
@@ -92,10 +163,9 @@ LC-003 реализует минимальный runtime. Код зафикси�
 обязательная native-приёмка целевых ОС перенесена в финальный этап LC-014.
 Это перенос срока проверки; native результаты пока не получены и не получают PASS.
 LC-004 принят пользователем и закрыт 2026-11-05 после ручной приёмки.
-Коммиты yaneMedia/yaneCompanion пользователь создаст отдельно; текущая приёмка
-фиксирует проверенную рабочую копию. Следующий LC-005 не начат.
-Сопряжение и отзыв работают; website torrent admission, media sessions, tray и
-installers остаются будущими этапами.
+Проверенные коммиты LC-004: yaneMedia `1c71769`, yaneCompanion `505cc0d`.
+Сопряжение и отзыв работают; website torrent admission впоследствии добавлен
+и принят в LC-005. Media sessions, tray и installers остаются будущими этапами.
 
 ## LC-004: сопряжение и границы engine
 

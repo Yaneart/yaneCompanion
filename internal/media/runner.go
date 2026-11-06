@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"os"
 	"os/exec"
 	"time"
 
@@ -25,6 +27,53 @@ func (r *Runner) Probe(ctx context.Context, args []string) ([]byte, error) {
 }
 func (r *Runner) Prepare(ctx context.Context, args []string) ([]byte, error) {
 	return r.run(ctx, r.ffmpeg, args, r.preparation)
+}
+
+// Continuous preparation owns its lane until EOF or cancellation. Output files,
+// startup/stall deadlines and backpressure are bounded by Playback's monitor.
+func (r *Runner) generate(ctx context.Context, args []string, consume func(context.Context, io.Reader) error) error {
+	return r.preparation.Run(ctx, func(ctx context.Context) error {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		output := &boundedOutput{overflow: make(chan struct{}, 1), limit: 64 << 10}
+		cmd := exec.Command(r.ffmpeg, args...)
+		cmd.Stderr = output
+		stdout, pipeOutput, err := os.Pipe()
+		if err != nil {
+			return errors.New("MEDIA_UNAVAILABLE")
+		}
+		defer stdout.Close()
+		cmd.Stdout = pipeOutput
+		worker, err := lifecycle.Start(cmd)
+		pipeOutput.Close()
+		if err != nil {
+			return errors.New("MEDIA_UNAVAILABLE")
+		}
+		defer worker.Stop()
+		consumed := make(chan error, 1)
+		go func() { consumed <- consume(ctx, stdout) }()
+		defer func() { cancel(); worker.Stop(); <-consumed }()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-output.overflow:
+			return errors.New("OUTPUT_LIMIT")
+		case err := <-consumed:
+			consumed <- err
+			if err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-worker.Done():
+				if worker.Wait() != nil {
+					return errors.New("MEDIA_FAILED")
+				}
+				return nil
+			}
+		}
+	})
 }
 
 type boundedOutput struct {

@@ -14,9 +14,12 @@ LC-003 принят и закрыт 2026-11-05; код опубликован в
 этап принят пользователем и закрыт 2026-11-05 после ручной проверки; коммиты
 `yaneMedia 1c71769` / `yaneCompanion 505cc0d` проверены.
 В **LC-005** реализованы отдельный metadata discovery на сайте, validated locators,
-controller leases и локальный приём раздачи с выбором файла. Этап ожидает ручной
-приёмки и пользовательских коммитов.
-Воспроизведение, значок в трее и установщики относятся к следующим этапам.
+controller leases и локальный приём раздачи с выбором файла. Этап принят пользователем
+и закрыт 2026-11-06; проверены коммиты `yaneMedia 9c2d4b9` / `yaneCompanion f2a8772`.
+В **LC-006** реализованы probe/configure, непрерывный локальный HLS, измеренная
+шкала времени, отдельные read grants и ограниченный кэш. Focused проверки и один
+независимый tester завершены с PASS; пользовательская приёмка и коммит ещё предстоят. LC-007 не начат.
+Подключение к обычной странице — LC-008; значок в трее и установщики — LC-010.
 **Локальная загрузка доступна в Public; воспроизведение ещё не подключено.**
 
 ## Как ориентироваться в папках
@@ -166,7 +169,8 @@ JacRed/Knaben из своего env; при отсутствии источни�
 сессию; выбранный candidate передаётся helper после отдельного resolve на 120 s.
 Ручные magnet и `.torrent` уходят только в helper, без backend upload. Выберите
 видео из списка: текущая версия получает ограниченный префикс до 1 MiB и показывает
-количество байтов. Готового media source пока нет — это LC-006/008.
+количество байтов. Этот UI пока использует только LC-005; API media source добавлен
+в LC-006, подключение к обычной странице относится к LC-008.
 «Остановить загрузку», отзыв доступа, уход со страницы или смена аккаунта закрывают
 controller; пропавшая вкладка ограничена lease 180 s. Каждая вкладка имеет своего
 владельца, второе одновременное открытие получает `DEVICE_BUSY`.
@@ -227,6 +231,56 @@ Set-Location "$env:USERPROFILE\yaneCompanion\dist\windows-amd64"
 На телефоне/узком окне кнопка находится в меню мобильной шапки. Проверять playback
 для LC-004 ещё не требуется.
 
+## Локальный media API (LC-006)
+
+Существующий Public file picker сохраняет ограниченную команду `select` из LC-005.
+Новый путь: `probe` выбранного `fileRef` → metadata и свежие audio refs → `configure`
+с полной target (`fileRef`, `audioRef`, `textRef: null`, `positionSeconds`,
+`output: "original"`) и проверенными браузером `clientMedia` MIME/codecs.
+Команды используют прежние UUID/replay/CAS/operation endpoints. Пока нет готового
+probe, configure возвращает `PROBE_REQUIRED`; неподдержанный формат или MIME —
+`UNSUPPORTED_MEDIA`, без скрытой смены качества или server fallback.
+
+`ready` возвращает `source` с id/revision, HLS URL, timeline, available ranges,
+описанием фактического video/audio output и количеством байтов кэша. Video H.264/
+HEVC сохраняет исходные resolution/bit depth/HDR; браузер должен подтвердить MIME.
+Совместимый AAC/AC-3/E-AC-3 копируется, при необходимости звук отдельно преобразуется
+в AAC stereo. Сейчас объявлен только `original`: SDR video encoding, 4K transcode,
+HDR→SDR, hardware acceleration и субтитры не объявляются реализованными.
+
+Один FFmpeg muxer пишет fMP4 в ограниченный pipe. Host проверяет размеры боксов и
+измеряет fragment clocks, публикует HLS с fragment durations до 3 s. Сегменты не
+обязаны начинаться с keyframe: непрерывная декодирующая цепочка сохраняется,
+новый host seek запускает новый source с исходного keyframe. HLS не объявляет
+`INDEPENDENT-SEGMENTS`. Шкала `absoluteAnchor + currentTime - mediaAnchor` использует
+реальный первый packet PTS и decode/presentation offset, а не requested seek.
+
+Подготовка ограничена окном 8–45 s плюс один fragment и byte-aware cache: цель
+48 MiB, жёсткий предел 128 MiB, один fragment до 64 MiB. Pipe останавливает
+production при паузе независимо от input buffering. Просмотренная часть удаляется
+только по подтверждённой позиции; открытый HTTP response удерживает свой файл.
+Начальная decoder chain сохраняется до первого подтверждения. Если byte pressure
+наступает раньше стартовых 6 s, ready использует реально доступный префикс; если
+бюджет не позволяет подготовить requested seek, возвращается `RESOURCE_LIMIT`.
+`POST /v1/sessions/{id}/progress` с controller bearer, `sourceRevision` и
+`positionSeconds` подтверждает позицию внутри подготовленных ranges, без продления
+lease. Download/media GET не считаются просмотром. ENDLIST появляется только после
+успешного абсолютного EOF; source revision не меняется при обычном продолжении.
+
+Media GET/HEAD доступны только по отдельному random read grant, exact Origin/Host,
+без Authorization/Cookie/Range и redirect. Grant не даёт control, raw torrent или
+filesystem access; revoke/lease/stop/replacement сразу его закрывают. Preparation
+и её children отменяются до engine Drop. Worker input — отдельный private loopback
+bridge с exact authenticated 256 KiB ranges; engine password/URL не передаются
+FFmpeg или браузеру. Для metadata ограничение input 32 MiB и stdout 1 MiB;
+network/secondary playlists/file protocols и произвольные URL запрещены.
+
+Проверка готовых media tools: `YANE_TEST_EXECUTABLE=<absolute bundle executable>`
+и `go test ./internal/media ./internal/api ./internal/sessions`. Для настоящей
+раздачи дополнительно задайте `YANE_TEST_TORRENT=<validated local .torrent>` и
+запустите `go test ./internal/media -run TestTorrentMedia -v`.
+Результаты и непроверенные условия — [verification](docs/verification.md).
+
 ## Пользовательские данные и завершение
 
 Windows: state/config в `%LOCALAPPDATA%\yaneCompanion`, cache — в его `cache`.
@@ -246,7 +300,8 @@ Engine cache — 256 MiB; общий disk cache — 2 GiB с резервом с
 Host проверяет disk budget при старте и каждую секунду; превышение прекращает
 runtime. Media runner ограничивает время и stdout/stderr; отдельно доступны одна
 video preparation и один metadata job, по одной ожидающей работе. Это не измеренный
-RAM/CPU budget. Полное управление rolling playback и его backpressure — LC-006/013.
+RAM/CPU budget. В LC-006 preparation использует backpressure ниже; измерение
+общих RAM/CPU budgets и расширенное восстановление относятся к LC-013.
 
 ## Сборка
 

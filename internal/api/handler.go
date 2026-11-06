@@ -206,12 +206,19 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.Sessions != nil {
 			capabilities = append(capabilities, "torrent-admission.v1", "torrent-files.v1")
+			if h.Sessions.MediaEnabled() {
+				capabilities = append(capabilities, "sessions.v1", "hls.mse", "timeline.windowed-vod", "video.original", "audio.aac")
+			}
 		}
 		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "api": map[string]int{"major": 1, "minor": 0}, "bootId": h.BootID, "capabilities": capabilities})
 		return
 	}
 	if h.Pairings == nil {
 		fail(w, 404, "NOT_FOUND")
+		return
+	}
+	if mediaRoute.MatchString(r.URL.Path) {
+		h.mediaAPI(w, r, origin)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/controllers") || strings.HasPrefix(r.URL.Path, "/v1/sessions") || strings.HasPrefix(r.URL.Path, "/v1/operations") {
@@ -271,6 +278,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func routeMethods(path string) string {
+	if mediaRoute.MatchString(path) {
+		return "GET,HEAD"
+	}
 	switch path {
 	case "/hello":
 		return "GET"
@@ -323,7 +333,7 @@ func (h Handler) local(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/local/status" && r.Method == "GET":
-		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "bootId": h.BootID, "admission": h.Sessions != nil, "playback": false})
+		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "bootId": h.BootID, "admission": h.Sessions != nil, "playback": h.Sessions != nil && h.Sessions.MediaEnabled()})
 	case r.URL.Path == "/local/exit" && r.Method == "POST":
 		w.WriteHeader(202)
 		select {

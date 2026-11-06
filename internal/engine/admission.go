@@ -8,8 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/url"
-	"strconv"
 
 	"yanecompanion/internal/locator"
 )
@@ -116,28 +114,18 @@ func (e *Engine) Files(ctx context.Context, hash string) ([]File, error) {
 	return result.Files, nil
 }
 
-// LC-005 proves local piece delivery with a bounded prefix. Rolling preparation
-// belongs to LC-006; never download an entire film or expose this raw URL.
+// Retained LC-005 admission command: bounded prefix only, without media work.
 func (e *Engine) Download(ctx context.Context, hash string, file File) (int64, error) {
 	size := min(file.Length, int64(1<<20))
 	if size < 1 {
 		return 0, locator.ErrUnsafe
 	}
-	query := url.Values{"link": {hash}, "index": {strconv.Itoa(file.Index)}, "play": {""}}
-	request, _ := http.NewRequestWithContext(ctx, "GET", e.address+"/stream?"+query.Encode(), nil)
-	request.SetBasicAuth("companion", e.password)
-	request.Header.Set("Range", "bytes=0-"+strconv.FormatInt(size-1, 10))
-	client := *e.client
-	client.Timeout = 0
-	response, err := client.Do(request)
+	body, err := e.OpenRange(ctx, hash, file, 0, size-1)
 	if err != nil {
 		return 0, ErrUnavailable
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 206 || response.ContentLength != size || response.Header.Get("Content-Range") != "bytes 0-"+strconv.FormatInt(size-1, 10)+"/"+strconv.FormatInt(file.Length, 10) {
-		return 0, ErrUnavailable
-	}
-	n, err := io.CopyN(io.Discard, response.Body, size)
+	defer body.Close()
+	n, err := io.CopyN(io.Discard, body, size)
 	if err != nil {
 		return n, ErrUnavailable
 	}

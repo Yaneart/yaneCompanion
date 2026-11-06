@@ -26,7 +26,7 @@ func sessionMethods(path string) string {
 	if len(parts) == 2 && parts[0] == "sessions" && resourceID.MatchString(parts[1]) {
 		return "GET,DELETE"
 	}
-	if len(parts) == 3 && parts[0] == "sessions" && resourceID.MatchString(parts[1]) && parts[2] == "commands" {
+	if len(parts) == 3 && parts[0] == "sessions" && resourceID.MatchString(parts[1]) && (parts[2] == "commands" || parts[2] == "progress") {
 		return "POST"
 	}
 	if len(parts) == 2 && parts[0] == "operations" && len(parts[1]) == 36 {
@@ -118,24 +118,39 @@ func (h Handler) sessionAPI(w http.ResponseWriter, r *http.Request, origin strin
 		return
 	}
 	if len(parts) == 3 {
-		var body struct {
-			Action   string `json:"action"`
-			Revision int    `json:"expectedRevision"`
-			FileRef  string `json:"fileRef"`
-		}
-		data, ok := readJSON(w, r, &body, 1024)
-		if !ok {
+		if parts[2] == "progress" {
+			var body struct {
+				Revision int      `json:"sourceRevision"`
+				Position *float64 `json:"positionSeconds"`
+			}
+			if _, ok := readJSON(w, r, &body, 1024); !ok {
+				return
+			}
+			if body.Position == nil {
+				fail(w, 400, "INVALID_POSITION")
+				return
+			}
+			if !failure(h.Sessions.Progress(origin, token, id, body.Revision, *body.Position)) {
+				respond(w, 204, nil)
+			}
 			return
 		}
-		if body.Action != "select" {
-			fail(w, 422, "UNSUPPORTED_CAPABILITY")
+		var body sessions.Command
+		data, ok := readJSON(w, r, &body, 8192)
+		if !ok {
 			return
 		}
 		if len(r.Header.Values("Idempotency-Key")) != 1 {
 			fail(w, 400, "INVALID_INPUT")
 			return
 		}
-		result, err := h.Sessions.Select(origin, token, id, r.Header.Get("Idempotency-Key"), data, body.Revision, body.FileRef)
+		var result sessions.Admission
+		var err error
+		if body.Action == "select" && body.Target == nil && body.ClientMedia == nil {
+			result, err = h.Sessions.Select(origin, token, id, r.Header.Get("Idempotency-Key"), data, body.Revision, body.FileRef)
+		} else {
+			result, err = h.Sessions.Command(origin, token, id, r.Header.Get("Idempotency-Key"), data, body)
+		}
 		if !failure(err) {
 			respond(w, 202, result)
 		}

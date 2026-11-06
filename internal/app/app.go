@@ -19,6 +19,7 @@ import (
 	"yanecompanion/internal/config"
 	"yanecompanion/internal/engine"
 	"yanecompanion/internal/lifecycle"
+	"yanecompanion/internal/media"
 	"yanecompanion/internal/pairing"
 	localsessions "yanecompanion/internal/sessions"
 	"yanecompanion/release"
@@ -103,7 +104,7 @@ func Run(ctx context.Context, options Options) (result error) {
 		return err
 	}
 	defer worker.Close()
-	admissions := localsessions.New(worker)
+	admissions := localsessions.NewWithMedia(worker, &media.Service{Runner: media.New(bundle.FFmpeg, bundle.FFprobe), Backend: worker, Directory: runDir})
 	defer admissions.Close()
 	pairings.OnRevoke = admissions.Revoke
 	controlPath := filepath.Join(options.Paths.State, "control.json")

@@ -73,7 +73,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("BUNDLE_MISSING")
 	}
-	options := app.Options{Paths: paths, BundleDir: filepath.Dir(executable), Ready: func() { fmt.Println("yaneCompanion ready (local torrent admission available; playback unavailable)") }}
+	options := app.Options{Paths: paths, BundleDir: filepath.Dir(executable), Ready: func() { fmt.Println("yaneCompanion ready (local torrent admission and media preparation available)") }}
 	if *origin != "" {
 		options.Origins = []string{*origin}
 	}

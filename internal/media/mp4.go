@@ -154,10 +154,12 @@ func initClock(data []byte) (mp4Clock, error) {
 	return c, nil
 }
 
-type fragmentTime struct{ start, end, pts, minDecode float64 }
+type fragmentTime struct{ start, end, pts, minDecode, minPTS, allEnd float64 }
+
+var errAudioOnly = errors.New("AUDIO_ONLY_FRAGMENT")
 
 func (c mp4Clock) fragment(data []byte) (fragmentTime, error) {
-	result := fragmentTime{minDecode: math.Inf(1)}
+	result := fragmentTime{minDecode: math.Inf(1), minPTS: math.Inf(1)}
 	moof, err := child(data, "moof")
 	if err != nil {
 		return result, err
@@ -213,12 +215,7 @@ func (c mp4Clock) fragment(data []byte) (fragmentTime, error) {
 		scale := float64(c.timescales[id])
 		start := float64(decode) / scale
 		result.minDecode = math.Min(result.minDecode, start)
-		if id != c.video {
-			continue
-		}
-		found = true
-		result.start = start
-		result.pts = math.Inf(1)
+		track := fragmentTime{start: start, pts: math.Inf(1)}
 		entries, err := boxes(b.data)
 		if err != nil {
 			return result, err
@@ -276,14 +273,28 @@ func (c mp4Clock) fragment(data []byte) (fragmentTime, error) {
 				if off > len(e.data) {
 					return result, errPlaylist
 				}
-				result.pts = math.Min(result.pts, (float64(decode)+float64(composition))/scale)
+				presentation := (float64(decode) + float64(composition)) / scale
+				track.pts = math.Min(track.pts, presentation)
+				track.allEnd = math.Max(track.allEnd, presentation+float64(duration)/scale)
 				decode += uint64(duration)
 			}
 		}
-		result.end = float64(decode) / scale
+		track.end = float64(decode) / scale
+		if !finite(track.pts) || track.end <= track.start || track.end-track.start > 45 {
+			return result, ErrUnsupported
+		}
+		result.allEnd = math.Max(result.allEnd, math.Max(track.end, track.allEnd))
+		result.minPTS = math.Min(result.minPTS, track.pts)
+		if id == c.video {
+			found = true
+			result.start, result.end, result.pts = track.start, track.end, track.pts
+		}
 	}
-	if !found || !finite(result.pts) || result.end <= result.start || result.end-result.start > 45 {
-		return result, errors.New("UNSUPPORTED_MEDIA")
+	if !found {
+		if finite(result.minDecode) && result.allEnd > result.minDecode {
+			return result, errAudioOnly
+		}
+		return result, ErrUnsupported
 	}
 	return result, nil
 }

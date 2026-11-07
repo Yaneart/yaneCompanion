@@ -1,9 +1,95 @@
 # Проверки и границы runtime
 
+## LC-007 — озвучки, субтитры и ресурсы (2026-11-07)
+
+Реализован по команде пользователя. Приёмка и пользовательский коммит предстоят;
+обычная media page и production host adapter остаются LC-008.
+Один независимый tester после исправлений и повторной проверки — **PASS**;
+подтверждённых неустранённых дефектов нет.
+
+- Probe выдаёт language/title/default для audio, language/default/forced/SDH и
+  availability для текста. Встроенные SRT/WebVTT/mov_text/text превращаются в VTT,
+  ASS/SSA сохраняют стили; PGS/VobSub/неизвестные codecs объявляются недоступными.
+  Sidecars принимаются только из той же директории с точным stem видео и суффиксами
+  языка/forced/SDH/default, ≤2 MiB; другое имя/серия не подбирается.
+- GET/HEAD текста и TTF/OTF используют текущий source read grant и прежние exact
+  Host/Origin/lease guards, без cookie/bearer/range/query/raw path. Новая probe
+  выдаёт новые track refs, replacement сразу закрывает старые resource URLs.
+  HEAD не запускает extraction. Font tables/signature/offsets проверяются;
+  attachment names не становятся локальными путями или worker args.
+- Lazy text lane: одна активная/одна ожидающая работа независимо от continuous
+  HLS, deadline 30 s; окно 180 s lookbehind +120 s ahead, cues абсолютные и ≤120 s.
+  Окно учитывает player delay±60 s; cache refill при position+90>coverage сохраняет
+  запас для negative delay и очередного обновления cues. Exact-name ASS sidecars
+  получают те же approved embedded fonts. Недоступные tracks имеют валидный scoped
+  descriptor URL, но GET остаётся404 без запуска worker.
+  Вход ≤128 MiB/job, sidecar ≤2 MiB, output ≤2 MiB; превышение входного budget
+  не публикует частичное окно. До 16 text tracks и четырёх fonts ≤1 MiB каждый,
+  resource cache ≤8 MiB включён в общий media cache ≤128 MiB.
+  Смена source/stop/revoke/request abort отменяет worker; cleanup ждёт readers.
+- Windows: `go test ./internal/media ./internal/sessions ./internal/api` PASS.
+  Новый 192 s fixture: H264 copy, две PCM→AAC дорожки, реальные decoded tones
+  440/880 Hz, embedded SRT/ASS, exact-name sidecar, TTF; probe/GET/font/seek156 s/
+  fresh refs/old grant/cleanup и отмена extraction без partial cache — PASS.
+  Регрессии проверяют−60 s в начале, +60 s с cue20..140 на position190,
+  ранний refill0..120→160 при position40 и font descriptor внешнего ASS.
+- Реальный seek190/192 s выявил конечный AAC-only moof после видео. Перед
+  публикацией host удерживает один bounded fragment до следующего header/EOF.
+  Один final tail≤100 ms/64 KiB объединяется с ещё не опубликованным video fragment;
+  audio bytes сохраняются, измеренное video time не меняется. Mid-file/повторный/
+  oversized tail отклоняется. Проверены actual Prepare190, два moof в одном segment,
+  unchanged timeline и прежние high-bitrate/budget/initial-chain regressions.
+- Debian bookworm: новые media/policy и API resource-grant checks на bundled Linux
+  FFmpeg PASS при UID65534, read-only, network none. Это userspace, не native desktop.
+- Frontend: `test/localTracks.test.ts` и scoped TypeScript check модуля/стенда PASS.
+  Модуль `localTracks.ts` готовит строгие MSE/omit descriptors и обновляет captions
+  по confirmed progress. Он не подключает обычную media page.
+- Playwright, registry player 0.1.18, настоящий API/pairing/local consent и FFmpeg,
+  deterministic file-range backend вместо torrent networking: реальные browser
+  peaks 880.37→439.45 Hz, paused seek156.5 s, audio replacement, intent/rate1.5,
+  delay/style, embedded/sidecar cues и видимый ASS с настоящим Ink Free font — PASS.
+  Быстрые seek90→32: первый AbortError, последний ready32/rate2/paused. Недоступный
+  font route даёт caption error, после Off другой SRT работает; ASR остаётся off.
+  Continuous32→157.5 s/rate2: source revision неизменна, coverage92→142.8→181.1 s,
+  правильные active cues, progress без ошибок; stop→resource404.
+- PiP реально включён: warning `video-only`; ASS/DOM captions в PiP не обещаются.
+  Fullscreen проверен действием пользователя, браузер отказал в его включении;
+  fullscreen native PASS не заявляется. Целевая desktop/HTTPS/LNA/30 min приёмка LC-014
+  остаётся обязательной. Этот стенд не проверяет Internet swarm или обычную media page.
+- Независимый Chrome recheck: continuous delay−60 до65.27 s/rate2 с правильными cues
+  и ранним refill; actual seek190/192 s, endedtrue, +60 longcue; реальный ASS-sidecar
+  FontFace/JASSUB и один video — PASS. Disabled PGS не мешает открыть source,
+  unknown text codec объясняется русским текстом. Native/HTTPS/30 min не проверены.
+- Финальные Linux track/tail/budget/decoder-chain/API tests — PASS при UID65534,
+  read-only/network-none; Windows bundled `TestRuntimeLifecycle` — PASS.
+  Оба host targets дважды совпали побайтно; proof и input lock сверены. Engine,
+  FFmpeg/ffprobe и dependencies lock не менялись. Полной проверки проекта не было.
+- Стенды/FFmpeg/helper остановлены;45723/5174 свободны, нормальный профиль не менялся.
+  По отдельному запросу пользователя 2026-11-07 удалены scratch
+  `.tools/lc007-{browser,linux,tester-browser}`, media `.playwright-mcp` и `lc007-ass.png`.
+  Исходники и основные файлы готовых bundles до/после совпали по SHA-256;
+  готовые dist, зависимости, toolchains и build caches сохранены.
+
+Focused повторение (portable Go/cache setup — как в README):
+
+```powershell
+$env:YANE_TEST_EXECUTABLE = (Resolve-Path .\dist\windows-amd64\yanecompanion.exe).Path
+# Необязательно для Go checks; настоящий font нужен для browser FontFace/JASSUB:
+$env:YANE_TEST_FONT = 'C:\Windows\Fonts\Inkfree.ttf'
+.\.tools\go\bin\go.exe test ./internal/media ./internal/sessions ./internal/api
+```
+
+Browser stand opt-in: `YANE_BROWSER_STAND` — абсолютный отдельный scratch directory;
+`go test ./internal/api -run '^TestLC007Browser$' -v -timeout 30m`. Порт45723 должен
+быть свободен. `manage.url` в scratch открывает настоящее локальное подтверждение.
+В yaneMedia/frontend запустить Vite на localhost:5174 и открыть
+`/test/localTracks.html`. Файл `stop` в scratch штатно завершает stand. Нормальный
+пользовательский профиль не читается. Browser page — test source, в сборку сайта не входит.
+
 ## LC-006 — локальный media API (2026-11-06)
 
-Реализован по команде пользователя; пользовательская приёмка и коммит ещё предстоят.
-Обычный Public UI сохраняет LC-005 picker. App adapter — LC-008, LC-007 не начат.
+Принят и закрыт 2026-11-06; пользовательский коммит `c3fe04a` проверен.
+Обычный Public UI сохраняет LC-005 picker. App adapter — LC-008; результаты LC-007 выше.
 
 - Focused Windows: media/session/API/engine contracts и bundled runtime lifecycle.
   Настоящие ffprobe/FFmpeg проверяют непрерывный 96 s H.264 fixture, ready prefix,

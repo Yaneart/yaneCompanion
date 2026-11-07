@@ -32,9 +32,10 @@ func randomRef() string {
 // upstream ranges let a paused viewer release engine sockets without expiring
 // FFmpeg's input. No redirects, secondary inputs or filesystem protocols.
 type inputBridge struct {
-	url    string
-	server *http.Server
-	bytes  atomic.Int64
+	url      string
+	server   *http.Server
+	bytes    atomic.Int64
+	exceeded atomic.Bool
 }
 
 var inputOptions = []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", "mov,matroska,webm,avi,mpegts", "-max_streams", "64", "-max_pixels", "8847360", "-threads", "2", "-probesize", "8388608", "-analyzeduration", "8000000", "-max_alloc", "67108864"}
@@ -100,6 +101,7 @@ func bridge(ctx context.Context, backend RangeBackend, hash string, file engine.
 		for start <= end {
 			size := min(int64(256<<10), end-start+1)
 			if limit > 0 && b.bytes.Add(size) > limit {
+				b.exceeded.Store(true)
 				return
 			}
 			readCtx, finish := context.WithTimeout(requestCtx, 120*time.Second)

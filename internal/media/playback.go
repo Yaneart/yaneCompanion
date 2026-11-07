@@ -69,6 +69,7 @@ type Playback struct {
 	lastChange       time.Time
 	readers          chan struct{}
 	openFiles        map[string]int
+	captions         *captions
 }
 
 func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, probe *Probe, target Target, client []ClientMedia) (*Playback, error) {
@@ -90,6 +91,7 @@ func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, pr
 		return nil, err
 	}
 	p := &Playback{ctx: ctx, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{}), root: root, directory: directory, position: target.Position, window: WindowSeconds(probe.Video.Bitrate, 8), lastChange: time.Now(), readers: make(chan struct{}, 8), openFiles: map[string]int{}}
+	p.captions = &captions{service: s, hash: hash, file: file, probe: probe, busy: make(chan struct{}, 1), cache: map[string]resource{}}
 	b, err := bridge(ctx, s.Backend, hash, file, 0)
 	if err != nil {
 		cancel()
@@ -241,12 +243,81 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 	var clock mp4Clock
 	var origin float64
 	sequence := 0
-	for {
-		if err := p.wait(ctx); err != nil {
+	// Keep one fragment until the next header/EOF. A final encoder flush can then
+	// join its video fragment before publication, preserving every audio sample.
+	var pending []byte
+	var pendingTime fragmentTime
+	audioTail := false
+	publish := func(fragment []byte, timing fragmentTime) error {
+		if err := ctx.Err(); err != nil {
 			return err
+		}
+		var err error
+		name := fmt.Sprintf("segment-%06d.m4s", sequence)
+		if err = p.root.WriteFile(name, fragment, 0600); err != nil {
+			return err
+		}
+		p.mu.Lock()
+		if sequence == 0 {
+			origin = timing.start
+			p.status.Timeline.MediaAnchor = timing.pts - timing.minDecode
+			if !finite(p.status.Timeline.MediaAnchor) || p.status.Timeline.MediaAnchor < 0 || p.status.Timeline.MediaAnchor > p.window {
+				p.mu.Unlock()
+				return ErrUnsupported
+			}
+		}
+		start := p.status.Timeline.AbsoluteAnchor + timing.start - origin
+		end := p.status.Timeline.AbsoluteAnchor + timing.end - origin
+		if !finite(start) || !finite(end) || math.Abs(start-p.status.Timeline.WindowEnd) > .1 {
+			p.mu.Unlock()
+			return errPlaylist
+		}
+		p.segments = append(p.segments, segment{Name: name, Duration: end - start, Start: start, End: end, Sequence: sequence})
+		if end-start > 3 {
+			p.mu.Unlock()
+			return errPlaylist
+		}
+		p.target = 3
+		p.status.Bytes += int64(len(fragment))
+		p.status.Downloaded = p.input.bytes.Load()
+		p.status.Timeline.WindowEnd = end
+		p.lastChange = time.Now()
+		err = p.evict()
+		if err == nil && (end >= p.position+6 || p.blocked() && end > p.position+0.1) {
+			select {
+			case <-p.ready:
+			default:
+				close(p.ready)
+			}
+		}
+		if err == nil && p.blocked() {
+			select {
+			case <-p.ready:
+			default:
+				p.status.Error = "RESOURCE_LIMIT"
+				err = errors.New("RESOURCE_LIMIT")
+			}
+		}
+		p.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		sequence++
+		return nil
+	}
+	for {
+		// A pending fragment needs one header of lookahead even at byte pressure.
+		// After publishing it, wait before reading another bounded mdat.
+		if pending == nil {
+			if err := p.wait(ctx); err != nil {
+				return err
+			}
 		}
 		data, kind, err := readBox(r)
 		if err == io.EOF {
+			if pending != nil {
+				return publish(pending, pendingTime)
+			}
 			return nil
 		}
 		if err != nil {
@@ -270,60 +341,56 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 				p.status.Bytes = int64(len(init))
 				p.mu.Unlock()
 			}
+
 		case "moof":
-			if clock.video == 0 {
+			if clock.video == 0 || audioTail {
 				return errPlaylist
 			}
 			timing, err := clock.fragment(data)
-			if err != nil {
+			onlyAudio := errors.Is(err, errAudioOnly)
+			if err != nil && !onlyAudio {
 				return err
+			}
+			if !onlyAudio && pending != nil {
+				if err := publish(pending, pendingTime); err != nil {
+					return err
+				}
+				pending = nil
+				if err := p.wait(ctx); err != nil {
+					return err
+				}
 			}
 			mdat, k, err := readBox(r)
 			if err != nil || k != "mdat" || len(data)+len(mdat) > segmentLimit {
 				return errPlaylist
 			}
-			name := fmt.Sprintf("segment-%06d.m4s", sequence)
-			if err = p.root.WriteFile(name, append(data, mdat...), 0600); err != nil {
-				return err
-			}
-			p.mu.Lock()
-			if sequence == 0 {
-				origin = timing.start
-				p.status.Timeline.MediaAnchor = timing.pts - timing.minDecode
-				if !finite(p.status.Timeline.MediaAnchor) || p.status.Timeline.MediaAnchor < 0 || p.status.Timeline.MediaAnchor > p.window {
-					p.mu.Unlock()
+			if onlyAudio {
+				anchor := origin
+				if sequence == 0 {
+					anchor = pendingTime.start
+				}
+				p.mu.Lock()
+				atEnd := p.status.Timeline.AbsoluteAnchor+pendingTime.end-anchor >= p.status.Timeline.Duration-.1
+				p.mu.Unlock()
+				// Only one <=100ms/64KiB encoder tail at absolute EOF may accompany the
+				// pending video fragment. No invented video clock, discarded audio or
+				// mutation of a fragment already served to a browser.
+				if pending == nil || !atEnd || timing.minDecode < pendingTime.end-.1 || timing.minPTS < pendingTime.end-.1 || timing.allEnd > pendingTime.end+.1 || timing.allEnd-timing.minDecode > .1 || len(data)+len(mdat) > 64<<10 || len(pending)+len(data)+len(mdat) > segmentLimit {
 					return ErrUnsupported
 				}
+				pending = append(pending, data...)
+				pending = append(pending, mdat...)
+				audioTail = true
+			} else {
+				pending = append(data, mdat...)
+				pendingTime = timing
 			}
-			start := p.status.Timeline.AbsoluteAnchor + timing.start - origin
-			end := p.status.Timeline.AbsoluteAnchor + timing.end - origin
-			if !finite(start) || !finite(end) || math.Abs(start-p.status.Timeline.WindowEnd) > .1 {
-				p.mu.Unlock()
-				return errPlaylist
-			}
-			p.segments = append(p.segments, segment{Name: name, Duration: end - start, Start: start, End: end, Sequence: sequence})
-			if end-start > 3 {
-				p.mu.Unlock()
-				return errPlaylist
-			}
-			p.target = 3
-			p.status.Bytes += int64(len(data) + len(mdat))
-			p.status.Downloaded = p.input.bytes.Load()
-			p.status.Timeline.WindowEnd = end
-			p.lastChange = time.Now()
-			err = p.evict()
-			if err == nil && (end >= p.position+6 || p.blocked() && end > p.position+0.1) {
-				select {
-				case <-p.ready:
-				default:
-					close(p.ready)
-				}
-			}
+			p.mu.Lock()
+			overBudget := p.status.Bytes+int64(len(pending)) > cacheLimit
 			p.mu.Unlock()
-			if err != nil {
-				return err
+			if overBudget {
+				return errors.New("RESOURCE_LIMIT")
 			}
-			sequence++
 		case "free", "sidx", "mfra":
 		default:
 			return errPlaylist
@@ -443,6 +510,7 @@ func (p *Playback) Serve(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 	if name == "master.m3u8" || name == "media.m3u8" {
+		// Generated media resources below use the same source lifetime and readers.
 		var b strings.Builder
 		if name == "master.m3u8" {
 			b.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-STREAM-INF:BANDWIDTH=100000000\nmedia.m3u8\n")
@@ -462,6 +530,11 @@ func (p *Playback) Serve(w http.ResponseWriter, r *http.Request, name string) {
 		if r.Method != "HEAD" {
 			_, _ = io.WriteString(w, data)
 		}
+		return
+	}
+	if p.captions != nil && (strings.HasPrefix(name, "text-") || strings.HasPrefix(name, "font-")) {
+		p.mu.Unlock()
+		p.serveResource(w, r, name)
 		return
 	}
 	allowed := name == "init.mp4"

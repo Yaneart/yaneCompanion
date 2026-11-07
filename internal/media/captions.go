@@ -1,0 +1,262 @@
+package media
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"yanecompanion/internal/engine"
+)
+
+type resource struct {
+	data       []byte
+	start, end float64
+}
+type captions struct {
+	service *Service
+	hash    string
+	file    engine.File
+	probe   *Probe
+	busy    chan struct{}
+	cache   map[string]resource // guarded by Playback.mu, also counted in status.Bytes
+	bytes   int
+}
+
+func (p *Playback) resourceInfo(name string) (Text, *Font, string, bool) {
+	for _, t := range p.captions.probe.Text {
+		if t.Available && name == "text-"+t.Ref+"."+t.Format {
+			mime := "text/vtt; charset=utf-8"
+			if t.Format == "ass" {
+				mime = "text/x-ssa; charset=utf-8"
+			}
+			return t, nil, mime, true
+		}
+	}
+	for _, f := range p.captions.probe.Fonts {
+		if name == "font-"+f.Ref+".bin" {
+			return Text{}, &f, "font/ttf", true
+		}
+	}
+	return Text{}, nil, "", false
+}
+
+func (p *Playback) serveResource(w http.ResponseWriter, r *http.Request, name string) {
+	t, font, mime, ok := p.resourceInfo(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	// HEAD describes an approved route without downloading/extracting anything.
+	if r.Method == "HEAD" {
+		return
+	}
+	select {
+	case p.captions.busy <- struct{}{}:
+		defer func() { <-p.captions.busy }()
+	default:
+		http.Error(w, "RESOURCE_LIMIT", 429)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(p.ctx, cancel)
+	defer stop()
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Now().Add(35 * time.Second))
+	stopWrite := context.AfterFunc(ctx, func() { _ = controller.SetWriteDeadline(time.Now()) })
+	defer stopWrite()
+	p.mu.Lock()
+	position := p.position
+	cached, exists := p.captions.cache[name]
+	p.mu.Unlock()
+	if !exists || font == nil && (position < cached.start || position+90 > cached.end && cached.end < p.captions.probe.Duration) {
+		data, start, end, err := p.extractResource(ctx, t, font, position)
+		if err != nil {
+			code, status := "SUBTITLE_UNAVAILABLE", 422
+			if font != nil {
+				code = "FONT_UNAVAILABLE"
+			}
+			if err.Error() == "OUTPUT_LIMIT" || err.Error() == "RESOURCE_LIMIT" {
+				code, status = "RESOURCE_LIMIT", 429
+			}
+			http.Error(w, code, status)
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		p.mu.Lock()
+		// No late publication after cancellation/replacement. Replacement has an
+		// independent cache and grant, and Close waits for these readers.
+		if p.ctx.Err() != nil {
+			p.mu.Unlock()
+			return
+		}
+		old := len(cached.data)
+		if p.captions.bytes-old+len(data) > resourceLimit || p.status.Bytes-int64(old)+int64(len(data)) > cacheLimit {
+			p.mu.Unlock()
+			http.Error(w, "RESOURCE_LIMIT", 429)
+			return
+		}
+		cached = resource{data, start, end}
+		p.captions.cache[name] = cached
+		p.captions.bytes += len(data) - old
+		p.status.Bytes += int64(len(data) - old)
+		p.mu.Unlock()
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(cached.data)))
+	if font == nil {
+		w.Header().Set("X-Yane-Text-End", strconv.FormatFloat(cached.end, 'f', 3, 64))
+		w.Header().Set("Access-Control-Expose-Headers", "X-Yane-Text-End")
+	}
+	_, _ = w.Write(cached.data)
+}
+
+func (p *Playback) extractResource(ctx context.Context, t Text, font *Font, position float64) ([]byte, float64, float64, error) {
+	c := p.captions
+	file, budget := c.file, int64(128<<20)
+	if t.Sidecar != nil {
+		file, budget = *t.Sidecar, textLimit+(256<<10)
+	}
+	b, err := bridge(ctx, c.service.Backend, c.hash, file, budget)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer b.Close()
+	args := []string{"-v", "error"}
+	if font != nil {
+		args = append(args, inputOptions...)
+		args = append(args, "-select_streams", strconv.Itoa(font.Index), "-show_entries", "stream=extradata", "-show_data", "-of", "json", b.url)
+		data, err := c.service.Runner.runLimit(ctx, c.service.Runner.ffprobe, args, c.service.Runner.resources, 5<<20)
+		if b.exceeded.Load() {
+			return nil, 0, 0, fmt.Errorf("RESOURCE_LIMIT")
+		}
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		var raw struct {
+			Streams []rawStream `json:"streams"`
+		}
+		if json.Unmarshal(data, &raw) != nil || len(raw.Streams) != 1 {
+			return nil, 0, 0, ErrUnsupported
+		}
+		data, err = decodeDump(raw.Streams[0].Extra)
+		if err != nil || len(data) != font.Size || !validateFont(data) {
+			return nil, 0, 0, ErrUnsupported
+		}
+		return data, 0, c.probe.Duration, nil
+	}
+	// The player supports delay [-60,+60]. Include a full 120s cue behind
+	// positive delay and leave refresh headroom beyond maximum negative delay.
+	start, end := math.Max(0, position-180), math.Min(c.probe.Duration, position+120)
+	args = append(args, "-nostdin", "-copyts", "-start_at_zero")
+	if t.Sidecar == nil {
+		args = append(args, "-ss", fmt.Sprint(start), "-t", fmt.Sprint(end-start))
+		args = append(args, inputOptions...)
+	} else {
+		args = append(args, "-protocol_whitelist", "http,tcp", "-format_whitelist", t.InputFormat, "-f", t.InputFormat, "-max_alloc", "8388608")
+	}
+	args = append(args, "-i", b.url, "-map", fmt.Sprintf("0:%d", t.Index), "-vn", "-an", "-dn", "-c:s", map[string]string{"vtt": "webvtt", "ass": "ass"}[t.Format], "-f", map[string]string{"vtt": "webvtt", "ass": "ass"}[t.Format], "pipe:1")
+	data, err := c.service.Runner.runLimit(ctx, c.service.Runner.ffmpeg, args, c.service.Runner.resources, textLimit)
+	if b.exceeded.Load() {
+		return nil, 0, 0, fmt.Errorf("RESOURCE_LIMIT")
+	}
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	data, err = subtitleWindow(data, t.Format, start, end)
+	return data, start, end, err
+}
+
+var cueClock = regexp.MustCompile(`^(?:(\d{1,6}):)?(\d{2}):(\d{2})[.,](\d{2,3})$`)
+
+func cueTime(value string) float64 {
+	parts := cueClock.FindStringSubmatch(strings.TrimSpace(value))
+	if parts == nil {
+		return math.NaN()
+	}
+	h, m, s := number(parts[1]), number(parts[2]), number(parts[3])+number("0."+parts[4])
+	if h < 0 || m < 0 || m >= 60 || s < 0 || s >= 60 {
+		return math.NaN()
+	}
+	return h*3600 + m*60 + s
+}
+
+// Keep authored ASS styles, but exclude embedded resource sections. All cue
+// timestamps stay absolute; the player applies the measured video timeline.
+func subtitleWindow(data []byte, format string, start, end float64) ([]byte, error) {
+	if len(data) > textLimit || !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+		return nil, ErrUnsupported
+	}
+	text := strings.ReplaceAll(string(data), "\r", "")
+	count := 0
+	overlaps := func(a, b string) (bool, error) {
+		from, to := cueTime(a), cueTime(b)
+		count++
+		if !finite(from) || !finite(to) || to <= from || to-from > 120 || count > 10000 {
+			return false, ErrUnsupported
+		}
+		return to > start && from < end, nil
+	}
+	var out []string
+	if format == "vtt" {
+		for _, block := range strings.Split(text, "\n\n") {
+			lines := strings.Split(block, "\n")
+			for _, line := range lines {
+				if strings.Contains(line, "-->") {
+					fields := strings.Fields(line)
+					if len(fields) < 3 || fields[1] != "-->" {
+						return nil, ErrUnsupported
+					}
+					keep, err := overlaps(fields[0], fields[2])
+					if err != nil {
+						return nil, err
+					}
+					if keep {
+						out = append(out, block)
+					}
+					break
+				}
+			}
+		}
+		if len(out) == 0 {
+			out = append(out, "00:00:00.000 --> 00:00:00.001\n\u200b")
+		}
+		return []byte("WEBVTT\n\n" + strings.Join(out, "\n\n") + "\n"), nil
+	}
+	section := ""
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "[") {
+			section = strings.ToLower(strings.TrimSpace(line))
+		}
+		if section != "[script info]" && section != "[v4+ styles]" && section != "[v4 styles]" && section != "[events]" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(line), "dialogue:") {
+			fields := strings.SplitN(strings.TrimPrefix(line, line[:strings.Index(line, ":")+1]), ",", 10)
+			if len(fields) != 10 {
+				return nil, ErrUnsupported
+			}
+			keep, err := overlaps(fields[1], fields[2])
+			if err != nil {
+				return nil, err
+			}
+			if !keep {
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n")), nil
+}

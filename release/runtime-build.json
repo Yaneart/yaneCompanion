@@ -6,7 +6,7 @@
     "repeatedBuildIdentical":  true,
     "inputLockSHA256":  "48257e777fb895364619e2ab43df2252f00cf3986060346616be04a5c1108b5c",
     "platformSHA256":  {
-                           "windows-amd64":  "588bddc4ff8f066ae1509b3fc717268c0249a034eeae119eac7d5507467c28b3",
-                           "linux-amd64":  "20f817df60d420e31e42bff6c303b75509dccc7c06fef372593598b172bd4ca7"
+                           "windows-amd64":  "e2501e1cc89634c9f74ba4879e73b524cefa8f9e77a0dc2b4e42c07bff668314",
+                           "linux-amd64":  "81deca709c9a9a31ce5586a9432fa08312e3bea9a98b1a8a3fdcaf0cd292b465"
                        }
 }

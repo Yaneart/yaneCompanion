@@ -4,18 +4,27 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"sort"
 	"time"
 
 	"yanecompanion/internal/config"
+	"yanecompanion/internal/engine"
 	"yanecompanion/internal/media"
 )
 
 type Source struct {
-	ID       string `json:"id"`
-	Revision int    `json:"revision"`
-	Type     string `json:"type"`
-	URL      string `json:"url"`
+	ID       string         `json:"id"`
+	Revision int            `json:"revision"`
+	Type     string         `json:"type"`
+	URL      string         `json:"url"`
+	Audio    []media.Audio  `json:"audioTracks"`
+	Text     []TextResource `json:"textTracks"`
 	media.PlaybackStatus
+}
+type TextResource struct {
+	media.Text
+	URL   string   `json:"url"`
+	Fonts []string `json:"fonts"`
 }
 type Command struct {
 	Action      string              `json:"action"`
@@ -81,6 +90,11 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 	if !video(file.Path) {
 		return Admission{}, denied(422, "UNSUPPORTED_MEDIA")
 	}
+	files := make([]engine.File, 0, len(s.files))
+	for _, f := range s.files {
+		files = append(files, f)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Index < files[j].Index })
 	previous := s.playback
 	if s.selectCancel != nil {
 		s.selectCancel()
@@ -125,6 +139,9 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 		var playback *media.Playback
 		if command.Action == "probe" {
 			probe, err = m.media.Probe(ctx, s.hash, file)
+			if err == nil {
+				probe.AddSidecars(file, files)
+			}
 		} else {
 			playback, err = m.media.Prepare(ctx, s.hash, file, probe, *command.Target, command.ClientMedia)
 		}
@@ -170,7 +187,21 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 			s.readGrant = secret(32)
 			s.sourceRevision++
 			s.snapshot.State = "ready"
-			s.snapshot.Source = &Source{ID: s.sourceID, Revision: s.sourceRevision, Type: "hls", URL: "http://" + config.Address + "/v1/media/" + s.readGrant + "/master.m3u8", PlaybackStatus: playback.Status()}
+			base := "http://" + config.Address + "/v1/media/" + s.readGrant + "/"
+			text := make([]TextResource, 0, len(probe.Text))
+			for _, t := range probe.Text {
+				resource := TextResource{Text: t, Fonts: []string{}}
+				// Every player descriptor needs a URL, including disabled tracks.
+				// Unavailable resources still reject reads without starting a worker.
+				resource.URL = base + "text-" + t.Ref + "." + t.Format
+				if t.Available && t.Format == "ass" {
+					for _, f := range probe.Fonts {
+						resource.Fonts = append(resource.Fonts, base+"font-"+f.Ref+".bin")
+					}
+				}
+				text = append(text, resource)
+			}
+			s.snapshot.Source = &Source{ID: s.sourceID, Revision: s.sourceRevision, Type: "hls", URL: base + "master.m3u8", Audio: probe.Audio, Text: text, PlaybackStatus: playback.Status()}
 		}
 		m.mu.Unlock()
 	}()

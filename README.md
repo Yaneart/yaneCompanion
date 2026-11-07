@@ -18,7 +18,11 @@ controller leases и локальный приём раздачи с выбор�
 и закрыт 2026-11-06; проверены коммиты `yaneMedia 9c2d4b9` / `yaneCompanion f2a8772`.
 В **LC-006** реализованы probe/configure, непрерывный локальный HLS, измеренная
 шкала времени, отдельные read grants и ограниченный кэш. Focused проверки и один
-независимый tester завершены с PASS; пользовательская приёмка и коммит ещё предстоят. LC-007 не начат.
+независимый tester завершены с PASS; этап принят и закрыт 2026-11-06, коммит `c3fe04a` проверен.
+В **LC-007** добавлены описания и выбор озвучек, локальная подготовка SRT/WebVTT/ASS,
+sidecars и вложенных TTF/OTF. Проверки и границы — в [verification](docs/verification.md).
+Один независимый tester и focused повторные проверки завершены с PASS.
+Пользовательская приёмка и коммит LC-007 ещё предстоят.
 Подключение к обычной странице — LC-008; значок в трее и установщики — LC-010.
 **Локальная загрузка доступна в Public; воспроизведение ещё не подключено.**
 
@@ -115,7 +119,9 @@ Host слушает только `127.0.0.1:45723`. Повторный запу�
 Этот origin — пример, production allowlist пока не задан. Для другого домена
 перезапустите helper с его exact HTTPS origin и выполните новое сопряжение.
 `GET /hello` проверяет exact Origin/Host и объявляет `pairing.v1`,
-`torrent-admission.v1` и `torrent-files.v1`; playback capabilities пока отсутствуют.
+`torrent-admission.v1`, `torrent-files.v1`, `sessions.v1`, `hls.mse`,
+`timeline.windowed-vod`, `video.original`, `audio.aac`, `audio.select`,
+`text.prepared`, `text.ass`, `text.sidecars`, `text.fonts`.
 
 Для текущего локального yaneMedia доступен отдельный opt-in:
 

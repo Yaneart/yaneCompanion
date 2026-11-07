@@ -14,12 +14,12 @@ import (
 )
 
 type Runner struct {
-	metadata, preparation *jobs.Gate
-	ffmpeg, ffprobe       string
+	metadata, preparation, resources *jobs.Gate
+	ffmpeg, ffprobe                  string
 }
 
 func New(ffmpeg, ffprobe string) *Runner {
-	return &Runner{metadata: jobs.New(), preparation: jobs.New(), ffmpeg: ffmpeg, ffprobe: ffprobe}
+	return &Runner{metadata: jobs.New(), preparation: jobs.New(), resources: jobs.New(), ffmpeg: ffmpeg, ffprobe: ffprobe}
 }
 
 func (r *Runner) Probe(ctx context.Context, args []string) ([]byte, error) {
@@ -96,11 +96,15 @@ func (w *boundedOutput) Write(data []byte) (int, error) {
 // The composition root supplies verified bundled tools. Structured worker args
 // are internal application data and are never accepted over HTTP.
 func (r *Runner) run(ctx context.Context, executable string, args []string, gate *jobs.Gate) ([]byte, error) {
+	return r.runLimit(ctx, executable, args, gate, 1<<20)
+}
+
+func (r *Runner) runLimit(ctx context.Context, executable string, args []string, gate *jobs.Gate, limit int) ([]byte, error) {
 	var output []byte
 	err := gate.Run(ctx, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		stdout := &boundedOutput{overflow: make(chan struct{}, 1), limit: 1 << 20}
+		stdout := &boundedOutput{overflow: make(chan struct{}, 1), limit: limit}
 		stderr := &boundedOutput{overflow: stdout.overflow, limit: 64 << 10}
 		cmd := exec.Command(executable, args...)
 		cmd.Stdout = stdout

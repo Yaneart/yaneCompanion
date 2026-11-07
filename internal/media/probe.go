@@ -36,11 +36,16 @@ type Audio struct {
 	ContentType string `json:"contentType,omitempty"`
 	Channels    int    `json:"channels"`
 	SampleRate  int    `json:"sampleRate"`
+	Label       string `json:"label"`
+	Language    string `json:"language,omitempty"`
+	Default     bool   `json:"default"`
 }
 type Probe struct {
 	Duration float64  `json:"durationSeconds"`
 	Video    Video    `json:"video"`
 	Audio    []Audio  `json:"audioTracks"`
+	Text     []Text   `json:"textTracks"`
+	Fonts    []Font   `json:"-"`
 	Outputs  []string `json:"outputs"`
 }
 type Service struct {
@@ -58,32 +63,72 @@ func (s *Service) Probe(ctx context.Context, hash string, file engine.File) (*Pr
 	}
 	defer b.Close()
 	args := append([]string{"-v", "error"}, inputOptions...)
-	args = append(args, "-show_streams", "-show_format", "-show_data", "-of", "json", b.url)
+	args = append(args, "-show_streams", "-show_format", "-of", "json", b.url)
 	data, err := s.Runner.Probe(ctx, args)
 	if err != nil {
 		return nil, err
 	}
+	// Attachment extradata can be megabytes. Read only the chosen video's small
+	// codec header here; fonts have their own bounded, lazy resource lane.
+	var raw struct {
+		Streams []rawStream `json:"streams"`
+	}
+	if json.Unmarshal(data, &raw) != nil {
+		return nil, ErrUnsupported
+	}
+	for i := range raw.Streams {
+		st := &raw.Streams[i]
+		if st.Type != "video" || st.Disposition.Attached != 0 {
+			continue
+		}
+		headerArgs := append([]string{"-v", "error"}, inputOptions...)
+		headerArgs = append(headerArgs, "-select_streams", strconv.Itoa(st.Index), "-show_entries", "stream=extradata", "-show_data", "-of", "json", b.url)
+		header, err := s.Runner.Probe(ctx, headerArgs)
+		if err != nil {
+			return nil, err
+		}
+		var result struct {
+			Streams []rawStream `json:"streams"`
+		}
+		if json.Unmarshal(header, &result) != nil || len(result.Streams) != 1 {
+			return nil, ErrUnsupported
+		}
+		st.Extra = result.Streams[0].Extra
+		break
+	}
+	var doc map[string]json.RawMessage
+	_ = json.Unmarshal(data, &doc)
+	doc["streams"], _ = json.Marshal(raw.Streams)
+	data, _ = json.Marshal(doc)
 	return parseProbe(data)
 }
 
 type rawStream struct {
-	Index       int    `json:"index"`
-	Type        string `json:"codec_type"`
-	Codec       string `json:"codec_name"`
-	Profile     string `json:"profile"`
-	Pixel       string `json:"pix_fmt"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	Level       int    `json:"level"`
-	Rate        string `json:"avg_frame_rate"`
-	Bitrate     string `json:"bit_rate"`
-	Extra       string `json:"extradata"`
-	Transfer    string `json:"color_transfer"`
-	Primaries   string `json:"color_primaries"`
-	Channels    int    `json:"channels"`
-	SampleRate  string `json:"sample_rate"`
+	Index      int    `json:"index"`
+	Type       string `json:"codec_type"`
+	Codec      string `json:"codec_name"`
+	Profile    string `json:"profile"`
+	Pixel      string `json:"pix_fmt"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	Level      int    `json:"level"`
+	Rate       string `json:"avg_frame_rate"`
+	Bitrate    string `json:"bit_rate"`
+	Extra      string `json:"extradata"`
+	Transfer   string `json:"color_transfer"`
+	Primaries  string `json:"color_primaries"`
+	Channels   int    `json:"channels"`
+	SampleRate string `json:"sample_rate"`
+	ExtraSize  int    `json:"extradata_size"`
+	Tags       struct {
+		Title    string `json:"title"`
+		Language string `json:"language"`
+	} `json:"tags"`
 	Disposition struct {
 		Attached int `json:"attached_pic"`
+		Default  int `json:"default"`
+		Forced   int `json:"forced"`
+		SDH      int `json:"hearing_impaired"`
 	} `json:"disposition"`
 }
 
@@ -101,7 +146,7 @@ func parseProbe(data []byte) (*Probe, error) {
 	if json.Unmarshal(data, &raw) != nil || len(raw.Streams) == 0 || len(raw.Streams) > 64 {
 		return nil, ErrUnsupported
 	}
-	p := &Probe{Duration: number(raw.Format.Duration), Audio: []Audio{}, Outputs: []string{"original"}}
+	p := &Probe{Duration: number(raw.Format.Duration), Audio: []Audio{}, Text: []Text{}, Outputs: []string{"original"}}
 	if !finite(p.Duration) || p.Duration <= 0 || p.Duration > 7*24*3600 {
 		return nil, ErrUnsupported
 	}
@@ -110,11 +155,13 @@ func parseProbe(data []byte) (*Probe, error) {
 		if st.Index < 0 || st.Index > 1024 {
 			return nil, ErrUnsupported
 		}
+		p.addResource(st)
 		if st.Type == "audio" {
 			if st.Channels < 1 || st.Channels > 32 {
 				return nil, ErrUnsupported
 			}
 			a := Audio{Index: st.Index, Ref: randomRef(), Codec: st.Codec, Channels: st.Channels, SampleRate: int(number(st.SampleRate))}
+			a.Label, a.Language, a.Default = label(st.Tags.Title, fmt.Sprintf("Audio %d", len(p.Audio)+1)), language(st.Tags.Language), st.Disposition.Default == 1
 			if a.SampleRate > 0 && a.SampleRate <= 48000 && a.Channels <= 8 {
 				switch {
 				case st.Codec == "aac" && (st.Profile == "LC" || st.Profile == "1"):
@@ -235,8 +282,17 @@ type Target struct {
 }
 
 func (p *Probe) Validate(target Target, client []ClientMedia) (*Audio, bool, error) {
-	if target.Output != "original" || target.TextRef != nil || !finite(target.Position) || target.Position < 0 || target.Position >= p.Duration || len(client) > 16 {
+	if target.Output != "original" || !finite(target.Position) || target.Position < 0 || target.Position >= p.Duration || len(client) > 16 {
 		return nil, false, ErrUnsupported
+	}
+	if target.TextRef != nil {
+		valid := false
+		for _, text := range p.Text {
+			valid = valid || text.Ref == *target.TextRef && text.Available
+		}
+		if !valid {
+			return nil, false, ErrUnsupported
+		}
 	}
 	supported := func(mime string) bool {
 		for _, c := range client {

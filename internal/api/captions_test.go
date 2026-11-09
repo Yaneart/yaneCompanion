@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"yanecompanion/internal/config"
+	"yanecompanion/internal/desktop"
 	"yanecompanion/internal/engine"
 	"yanecompanion/internal/locator"
 	"yanecompanion/internal/media"
+	"yanecompanion/internal/pairing"
 	"yanecompanion/internal/sessions"
 	"yanecompanion/release"
 	"yanecompanion/test/fixture"
@@ -175,12 +177,45 @@ func TestLC007Browser(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(directory, "manage.url"), []byte("http://"+config.Address+"/local/manage#"+manage), 0600)
 	t.Log("LC-007 browser harness ready; file ranges are a deterministic test fixture")
+	uiCtx, stopUI := context.WithCancel(context.Background())
+	defer stopUI()
+	uiDone := make(chan error, 1)
+	uiFinished := make(chan struct{})
+	if os.Getenv("YANE_BROWSER_DESKTOP") == "1" {
+		go func() {
+			defer close(uiFinished)
+			uiDone <- desktop.Run(uiCtx, desktop.Actions{
+				Snapshot: func() desktop.Snapshot {
+					r, g := h.Pairings.Snapshot()
+					return desktop.Snapshot{Status: "Тестовый стенд: API и FFmpeg", Site: h.DevelopmentOrigin, Activity: desktop.Activity(h.Sessions.Activity()), Requests: r, Grants: g}
+				},
+				SetSite:   func(string) error { return fmt.Errorf("Адрес стенда фиксирован") },
+				Autostart: func(bool) error { return fmt.Errorf("Автозапуск в стенде отключён") },
+				Decide:    func(r pairing.Request, approve bool) error { return h.Pairings.Decide(r.RequestID, r.Code, approve) },
+				Revoke:    h.Pairings.Revoke,
+				OpenSite:  func() error { return nil },
+			}, make(chan struct{}), false)
+		}()
+		defer func() {
+			stopUI()
+			select {
+			case <-uiFinished:
+			case <-time.After(3 * time.Second):
+				t.Error("desktop did not close")
+			}
+		}()
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	deadline := time.NewTimer(25 * time.Minute)
 	defer deadline.Stop()
 	for {
 		select {
+		case err := <-uiDone:
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
 		case <-ticker.C:
 			h.Sessions.Tick()
 			if _, err := os.Stat(filepath.Join(directory, "stop")); err == nil {

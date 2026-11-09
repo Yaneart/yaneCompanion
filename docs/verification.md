@@ -1,5 +1,66 @@
 # Проверки и границы runtime
 
+## LC-010 — desktop и установщики (2026-11-09)
+
+Реализация подготовлена по команде пользователя; этап **не принят и не закрыт**.
+Подпись владельцем, публикация downloads/AUR и native-приёмка целевых desktop ОС
+остаются открыты. Инструкции: [установка](installation.md).
+
+- Windows development host **10.0.19045**, amd64: bundled host и установленный
+  per-user fixture в пути с пробелами/кириллицей прошли native consent, restart с
+  сохранённым origin/grant, revoke, window hide, повторный запуск и Exit.
+  Фикстура installer отдельно собрана с override min Windows 10; итоговый package
+  требует Windows 11 и корректно отвергает Windows 10. Host PE machine `8664`,
+  subsystem GUI `2`; installer PE machine `8664`. Это **не Windows 11 PASS**.
+- Debian 12, Ubuntu 24.04, Arch snapshot 2026-11-09: настоящая установка пакетов,
+  desktop-file validation, non-root GTK startup/Exit под Xvfb/Openbox и focused
+  Linux unit checks. Debian GTK consent подтверждён кликом в окне; сохранение
+  site/grant после нового процесса проверено. Системных Node/Bun/FFmpeg нет;
+  запускаются bundled tools. Containers/Xvfb **не являются native desktop PASS**.
+- Debian `preinst`/`prerm` и Arch pacman PreTransaction `AbortOnFail` блокируют
+  reinstall работающего helper; status остаётся доступен. После явного Exit
+  reinstall проходит. `/proc/comm` используется вместо недоступного в restricted
+  root `/proc/exe`. На Arch отдельно проверены direct package и makepkg recipe.
+  Default makepkg strip менял все три tools: добавлены `!strip`/`!debug`, после
+  чего результаты побайтово совпадают с archive и сохраняют embedded SHA lock.
+  Публичный `yay update` не проверен: AUR release не опубликован.
+- Оба host targets дважды воспроизведены byte-for-byte; актуальные hashes и lock
+  находятся в `release/runtime-build.json`. Engine/media binaries и их security
+  lock не менялись. PNG иконки совпадает по SHA-256 с favicon yaneMedia.
+- Root Chromium/Playwright на обычной Public `/media/dune-part-two`: первый
+  выбор торрента открыл подключение, код сопоставлен с native окном и подтверждён
+  там; выбор автоматически продолжился в единственном video. Real API, consent,
+  FFmpeg и player, deterministic file-range fixture вместо Internet swarm.
+  Наблюдались playback >165s, повторное подключение без кода, native revoke с
+  прекращением просмотра при следующем запросе/heartbeat, server-torrent calls0.
+  Backend catalog CORS подставлен только в browser stand; helper guards и
+  permissions не обходились. Production HTTPS/LNA/fullscreen/30min — LC-014.
+- Проверены manual OS download links3, отсутствие фиктивного URL без release
+  settings, fixed `yanecompanion://open`, mobile390x700 и 360x640 без horizontal
+  overflow. Download base в browser stand — фиктивный test-only HTTPS host;
+  реального скачивания или публикации не было.
+- Frontend focused tests: connection14, localTorrent9, installation2,
+  deferred-selection4 — PASS; каждый React test file отдельным процессом для
+  module-mock isolation. Scoped tsc проверил CompanionDialog, installation model,
+  LocalTorrentLaunch и их import graph; changed-file prettier/oxlint — PASS.
+- Helper focused Settings/Desktop/Origin/Consent/Management и native tests
+  `TestInstalledDesktopConsentAndLifecycle`, `TestDesktopStartupFailureRemainsSingle`
+  — PASS. Desktop instance tests проверяют private activation proof, Origin/auth
+  rejection, GUI lifetime lock и malformed addresses без panic/non-loopback fetch.
+- Ровно один независимый tester подтвердил повторные focused checks. Он нашёл
+  два P2: второе GUI при `BUNDLE_MISSING` и panic на malformed activation port.
+  Исправлены lifetime `desktop.lock`/minimal local activation IPC, canonical port
+  validation и обработкой request-construction error. Оба собственных repro tester
+  и новые постоянные regressions повторно прошли. Последнее сообщение tester:
+  **final focused recheck PASS**; его сводный финальный ответ прерван usage limit.
+  Другие агенты не запускались. Открытых подтверждённых дефектов не оставлено.
+
+Полные project suites/builds/lint/typecheck yaneMedia не запускались; Docker Compose
+не перестраивался. Bundled host/package builds относятся непосредственно к LC-010.
+Обычный профиль helper, аккаунты и основное окружение проекта не использовались
+как test fixtures. Подписанный Windows release, native Windows 11 и Linux desktop,
+реальные AUR/yay update и production user install→connect→play остаются непроверены.
+
 ## LC-007 — озвучки, субтитры и ресурсы (2026-11-07)
 
 Реализован по команде пользователя. Приёмка и пользовательский коммит предстоят;

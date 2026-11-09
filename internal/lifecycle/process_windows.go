@@ -12,8 +12,11 @@ import (
 // This non-inheritable handle lives until process exit. Assigning the host
 // before starting workers removes the Start/Assign child escape race.
 var hostJob windows.Handle
+var installMutex windows.Handle
 
 func ContainHost() error {
+	// Installer detection only; the profile file lock remains authoritative.
+	installMutex, _ = windows.CreateMutex(nil, false, windows.StringToUTF16Ptr(`Local\yaneCompanion.Runtime`))
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return err

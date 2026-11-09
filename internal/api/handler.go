@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"yanecompanion/internal/config"
@@ -25,21 +24,18 @@ type Handler struct {
 	Pairings           *pairing.Store
 	Management         *Management
 	Sessions           *sessions.Manager
+	OriginAllowed      func(string) bool
+	Show               func()
 }
 
 func ValidOrigin(origin string) bool {
-	u, err := url.Parse(origin)
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.Hostname() != "" && u.User == nil && u.Path == "" && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.String() == origin && !strings.ContainsAny(origin, "*\\\r\n\t ")
+	return config.ValidOrigin(origin)
 }
 
 // HTTP is opt-in for an exact local development origin only. Production origins
 // still use ValidOrigin and never inherit this exception from the allowlist.
 func ValidDevelopmentOrigin(origin string) bool {
-	u, err := url.Parse(origin)
-	if err != nil || u.Scheme != "http" || !ValidOrigin("https"+strings.TrimPrefix(origin, "http")) {
-		return false
-	}
-	return u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	return config.ValidDevelopmentOrigin(origin)
 }
 
 func fail(w http.ResponseWriter, status int, code string) {
@@ -178,6 +174,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "Origin")
 	origin := r.Header.Get("Origin")
 	allowed := false
+	if h.OriginAllowed != nil {
+		allowed = h.OriginAllowed(origin)
+	}
 	for _, candidate := range h.Origins {
 		if origin == candidate {
 			allowed = true
@@ -334,6 +333,9 @@ func (h Handler) local(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/local/status" && r.Method == "GET":
 		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "bootId": h.BootID, "admission": h.Sessions != nil, "playback": h.Sessions != nil && h.Sessions.MediaEnabled()})
+	case r.URL.Path == "/local/show" && r.Method == "POST" && h.Show != nil:
+		h.Show()
+		respond(w, 202, nil)
 	case r.URL.Path == "/local/exit" && r.Method == "POST":
 		w.WriteHeader(202)
 		select {

@@ -39,6 +39,9 @@ type Options struct {
 	Origins           []string
 	DevelopmentOrigin string
 	Ready             func()
+	OriginAllowed     func(string) bool
+	Show              func()
+	DesktopReady      func(*pairing.Store, *localsessions.Manager)
 }
 
 func Run(ctx context.Context, options Options) (result error) {
@@ -136,10 +139,13 @@ func Run(ctx context.Context, options Options) (result error) {
 	}
 	defer os.Remove(controlPath)
 	stop := make(chan struct{}, 1)
-	server := &http.Server{Handler: api.Handler{BootID: boot, LocalToken: localToken, Origins: options.Origins, DevelopmentOrigin: options.DevelopmentOrigin, Stop: stop, Pairings: pairings, Management: &api.Management{}, Sessions: admissions}, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10}
+	server := &http.Server{Handler: api.Handler{BootID: boot, LocalToken: localToken, Origins: options.Origins, DevelopmentOrigin: options.DevelopmentOrigin, Stop: stop, Pairings: pairings, Management: &api.Management{}, Sessions: admissions, OriginAllowed: options.OriginAllowed, Show: options.Show}, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	defer server.Close()
+	if options.DesktopReady != nil {
+		options.DesktopReady(pairings, admissions)
+	}
 	if options.Ready != nil {
 		options.Ready()
 	}
@@ -172,7 +178,7 @@ func Run(ctx context.Context, options Options) (result error) {
 }
 
 func Control(ctx context.Context, paths config.Paths, action string, output io.Writer) error {
-	if action != "status" && action != "exit" && action != "manage" {
+	if action != "status" && action != "exit" && action != "manage" && action != "show" {
 		return errors.New("INVALID_COMMAND")
 	}
 	data, err := os.ReadFile(filepath.Join(paths.State, "control.json"))
@@ -187,7 +193,7 @@ func Control(ctx context.Context, paths config.Paths, action string, output io.W
 		return errors.New("STATE_UNAVAILABLE")
 	}
 	method := "GET"
-	if action == "exit" || action == "manage" {
+	if action == "exit" || action == "manage" || action == "show" {
 		method = "POST"
 	}
 	route := "/local/" + action

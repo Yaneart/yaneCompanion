@@ -15,6 +15,11 @@
   },
   "goModules": [
     {
+      "module": "github.com/ebitengine/purego",
+      "version": "v0.10.2",
+      "sum": "h1:W809HbnvzAxgdm+aOvlSekrM16wGCdT/e76+9tS7gzE="
+    },
+    {
       "module": "golang.org/x/sys",
       "commit": "b6b8557e8e2974925aec7a136ba0e323eedc5f43",
       "version": "v0.49.0",

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=yaneCompanion
+Comment=Local video playback for yaneMedia
+Comment[ru]=Локальный просмотр видео в yaneMedia
+Exec=/usr/lib/yanecompanion/yanecompanion %u
+Icon=yanecompanion
+Terminal=false
+Categories=AudioVideo;Video;
+MimeType=x-scheme-handler/yanecompanion;
+StartupWMClass=yanecompanion

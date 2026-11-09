@@ -114,7 +114,17 @@ func NewWithMedia(backend Backend, service *media.Service) *Manager {
 	m.media = service
 	return m
 }
-func (m *Manager) MediaEnabled() bool   { return m.media != nil }
+func (m *Manager) MediaEnabled() bool { return m.media != nil }
+
+// Activity reveals no torrent identity, file path, controller or read grant.
+func (m *Manager) Activity() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active == nil {
+		return ""
+	}
+	return m.active.snapshot.State
+}
 func (m *Manager) Errors() <-chan error { return m.fatal }
 func secret(n int) string               { return hex.EncodeToString(random(n)) }
 func random(n int) []byte {

@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+# Do not stop another user's viewing session during a package transaction.
+for process in /proc/[0-9]*/comm; do
+  name=$(cat "$process" 2>/dev/null || true)
+  case "$name" in
+    yanecompanion)
+      echo 'Close yaneCompanion using Exit before installing/updating/removing the package.' >&2
+      exit 1 ;;
+  esac
+done
+exit 0

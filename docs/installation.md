@@ -1,7 +1,8 @@
-# Установка yaneCompanion (LC-010)
+# Установка и обслуживание yaneCompanion
 
-Реализация для проверки, версия `0.2.0-dev`. Пакеты ещё не опубликованы; этап не
-принят и не закрыт. Windows 11 и native Linux desktop остаются отдельными gates.
+Текущая версия `0.3.0-dev` (LC-011). LC-010 принят как реализация 2026-11-09.
+Пакеты ещё не опубликованы; LC-011 проверен одним tester и ожидает приёмки. Windows 11 и native
+Linux desktop остаются отдельными gates LC-014.
 
 ## Для зрителя
 
@@ -55,15 +56,16 @@ Linux builder использует Docker с закреплённым Debian ima
 
 Результат в `dist/packages/`:
 
-- `yanecompanion-0.2.0-windows-amd64-setup.exe` — per-user Inno installer;
-- `yanecompanion_0.2.0_amd64.deb`;
-- `yanecompanion-bin-0.2.0-1-x86_64.pkg.tar.zst` — та же identity, что в AUR;
-- `yanecompanion-0.2.0-linux-amd64.tar.gz` и `aur/PKGBUILD`, `.install`;
+- `yanecompanion-0.3.0-windows-amd64-setup.exe` — per-user Inno installer;
+- `yanecompanion_0.3.0_amd64.deb`;
+- `yanecompanion-bin-0.3.0-1-x86_64.pkg.tar.zst` — та же identity, что в AUR;
+- `yanecompanion-0.3.0-linux-amd64.tar.gz` и `aur/PKGBUILD`, `.install`;
 - `packages.json` — размер и SHA-256 фактически собранных файлов.
 
 Без `-ReleaseBaseUrl` AUR directory использует локальный archive для проверки
 через makepkg. Для публикуемого recipe задайте окончательный HTTPS base URL;
-archive hash будет внесён в PKGBUILD. `.SRCINFO` генерируется владельцем через
+archive hash будет внесён в PKGBUILD. Старая `.SRCINFO` при пересборке удаляется;
+новая генерируется владельцем через
 `makepkg --printsrcinfo` после окончательного выбора URL. Бинарники на устройстве
 зрителя не компилируются. Pacman PreTransaction hook с `AbortOnFail` запрещает
 обновление/удаление работающего помощника; одни `.install` callbacks для этого
@@ -83,8 +85,8 @@ KDE/Xfce и Wayland необходимо проверять отдельно о�
 Для сайта после публикации задаются:
 
 ```dotenv
-VITE_COMPANION_DOWNLOAD_BASE_URL=https://downloads.example/releases/0.2.0
-VITE_COMPANION_DOWNLOAD_VERSION=0.2.0
+VITE_COMPANION_DOWNLOAD_BASE_URL=https://downloads.example/releases/0.3.0
+VITE_COMPANION_DOWNLOAD_VERSION=0.3.0
 ```
 
 Пустая/невалидная конфигурация не создаёт фиктивных download links. Выбор ОС
@@ -96,7 +98,8 @@ URL arguments, origin, code и credentials через protocol handler не пр
 
 Выбран **Authenticode с SHA-256 и RFC 3161 timestamp** для Windows host,
 installer и uninstaller. `-Release` требует `-SiteOrigin`, `-ReleaseBaseUrl`,
-`-SignTool`, `-SigningThumbprint` и `-TimestampUrl`; приватный ключ остаётся в
+`-UpdateFeedUrl`, `-UpdatePublicKey`, а для Windows также `-SignTool`,
+`-SigningThumbprint` и `-TimestampUrl`; приватный ключ остаётся в
 certificate store/token владельца, в аргументах используется только thumbprint.
 Перед подписью host пересобирается; compiler получает тот же signing command.
 Unsigned development packages не выдаются за подписанный release.
@@ -106,7 +109,102 @@ Unsigned development packages не выдаются за подписанный 
 ограничение поставки); полный inventory и corresponding sources включены в
 development package. Эти пункты нельзя заменить самоподписанным сертификатом,
 фиктивным publisher или автоматической публикацией. Подписанный manifest/update
-protocol и расширенная диагностика остаются LC-011.
+protocol и расширенная диагностика реализованы в LC-011; реальная production-подпись
+не заявляется.
+
+## Обновление, откат и удаление (LC-011)
+
+В native-окне выберите «Обслуживание» → «Проверить обновления». Проверок при
+запуске/без действия пользователя нет. Полный пакет и предыдущая версия скачиваются
+отдельными кнопками. Загрузка блокируется при активной torrent session, включая
+подготовку; проверка наличия обновления не меняет просмотр. «Выход» отменяет загрузку.
+Сбой или повторный запрос не оставляет готового файла с непроверенными байтами.
+
+После успешной проверки откройте папку пакетов. В `current/` лежит текущий пакет,
+в `previous/` — явно запрошенный пакет для отката; рядом сохраняется подписанный
+`manifest.json`. Установка только после явного «Выход»: Windows — открыть `.exe`,
+Debian/Ubuntu — пакетный менеджер / `sudo apt install ./<package>.deb`, Arch —
+`sudo pacman -U ./<package>.pkg.tar.zst`. Пакет для отката установите тем же способом;
+на Debian при необходимости подтвердите downgrade, на Arch также допустим `yay`
+для обычного обновления после реальной публикации AUR. Если новая версия не
+запускается, закройте её и установите заранее сохранённый previous package либо
+скачайте предыдущий release из канала владельца. Никаких shell/script команд из
+манифеста не исполняется. Автоматическая установка и перезапуск отсутствуют.
+
+Обновление и откат сохраняют `desktop.json` (site), `pairings.json`, профиль и
+явный выбор автозапуска. Формат настроек остаётся schema 1; существующие файлы
+LC-010 без schema читаются без миграции/перезаписи. Пакеты с другой settings schema
+или API major не предлагаются к установке этим updater. Неизвестная явно записанная
+schema настроек отклоняется, а не заменяется defaults. При несовместимом API сайт
+показывает установленную версию и различает обновление сайта/помощника; минимальная
+поддерживаемая helper version на сайте — 0.2.0, development suffix допускается.
+
+«Диагностика» в native-окне показывает version/platform/API/settings schema,
+версии engine/media tools и allowlisted startup/playback/update codes. Отчёт
+можно выделить в GTK и скопировать Ctrl+C из Windows message box. На сайте есть
+раскрываемая «Диагностика подключения», различающая browser permission, origin,
+сопряжение и несовместимость. Отчёты не сериализуют snapshots/errors целиком и не
+содержат magnet/hash фильма, file names/paths, origins, pairing/controller tokens
+или аккаунт. Ошибка установки отличается от ошибки запуска/воспроизведения.
+
+Перед удалением в «Обслуживании» выберите отдельно очистку кэша и сохранённых
+подключений, затем «Подготовить удаление и выйти». Активную session нужно остановить
+на сайте. Действие выключает autostart, закрывает helper и очищает выбранные данные
+под runtime lock; сайт не может его вызвать. Без флажков данные сохраняются.
+Затем используйте удаление программы в Windows, `sudo apt remove yanecompanion`
+или `sudo pacman -R yanecompanion-bin`. Package hooks не удаляют профили других
+пользователей; Linux package managers сохраняют пользовательские данные по умолчанию.
+Windows interactive uninstaller предлагает оба выбора; silent uninstall сохраняет
+данные. Настройки сайта сохраняются, pairing удаляется только по явному выбору.
+CLI-эквивалент после закрытия всех GUI/runtime: `yanecompanion clean-data --cache`
+и/или `--pairings`. Нет флагов — отказ. Очистка кэша удаляет только помеченные session
+директории и update slots `current`/`previous`; неизвестные файлы и state checkpoint
+сохраняются, в том числе при совпадающих XDG state/cache roots. Desktop lock
+включает startup-error окно: сначала его нужно закрыть.
+
+### Authenticity и выпуск владельцем
+
+Сборка принимает пару `-UpdateFeedUrl https://.../release.json` и
+`-UpdatePublicKey <64 lowercase hex characters>`. Публичный ключ закрепляется
+в host, канал/ключ не поступают с сайта, HTTP API или сетевого manifest. Без пары
+настроек выводится «Обновления пока не опубликованы владельцем». Production `-Release`
+требует эту пару. Приватный Ed25519 seed владелец хранит вне checkout/bundle.
+
+`scripts/release-manifest.ps1 -Version 0.3.0 -Sequence <increasing integer>
+-ReleaseBaseUrl https://.../0.3.0 -PublicKey <public hex> -KeyFile <external seed file>
+-Go .\.tools\go\bin\go.exe [-PreviousManifest <prior release.json>]` вычисляет
+size/SHA-256 всех четырёх фактических пакетов и подписывает `dist/packages/release.json`.
+Все current/previous packages должны присутствовать в `dist/packages`; старые файлы
+сохраняются при новой сборке. Сначала соберите Windows и Linux последовательно;
+одновременная запись в общий output не поддерживается. Windows package должен иметь
+действительную Authenticode signature. Release script не публикует файлы и не создаёт
+ключи. Seed file — 32 bytes в hex, public key обязан соответствовать ему.
+Сначала публикуются packages с versioned URLs, затем manifest по стабильному feed URL;
+предыдущие packages остаются доступны. Поддерживайте sequence монотонным, обновляйте
+подпись до expiry (14 дней по умолчанию; runtime допускает не более 30 дней).
+
+Envelope: `{payload: base64(canonical JSON), signature: base64(Ed25519 signature)}`;
+подпись покрывает `yaneCompanion release manifest v1\n` + exact payload bytes.
+Payload: schema 1, sequence, publishedAt/expiresAt, current и optional previous;
+release: version, api `{major,minor}`, settingsSchema, packages; package: platform,
+name, HTTPS URL, size, sha256. Platforms: windows-amd64/linux-deb-amd64/
+linux-arch-amd64/linux-archive-amd64. Runtime отвергает unknown/duplicate JSON fields,
+просроченный/будущий feed, replay меньшего sequence и иной payload с тем же sequence.
+High-water checkpoint записывается атомарно в state/updates и переживает reinstall.
+Redirects, credentials/query/fragment, scripts/произвольные имена, implicit downgrade
+и packages >512 MiB запрещены. Два cache slots дают максимум 1 GiB update cache,
+плюс bounded manifest metadata, отдельно от media budget; новый transfer в slot заменяет старый. HTTPS/hash не
+заменяют подпись. Ротация pinned key требует нового trusted полного пакета.
+
+Низкоуровневый owner tool: `go run ./cmd/release-manifest -manifest <signed.json>
+-public-key <hex> [-packages <directory>]` проверяет подпись и локальные packages.
+Для signing принимает unsigned JSON input, `-key-file`, `-packages`, `-out`.
+`-historical` разрешён только offline verification архивного manifest владельцем;
+live updater всегда проверяет expiry. Этим способом старый подписанный release
+переносится в свежий manifest как explicit previous без отключения freshness feed.
+Документация API: [Go Ed25519](https://pkg.go.dev/crypto/ed25519),
+[Go Root](https://pkg.go.dev/os#Root),
+[Inno uninstall events](https://jrsoftware.org/ishelp/topic_scriptevents.htm).
 
 ## Проверка и границы
 

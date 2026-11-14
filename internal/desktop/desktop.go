@@ -6,18 +6,24 @@ import "yanecompanion/internal/pairing"
 
 type Snapshot struct {
 	Status, Site, Activity string
+	Update                 string
 	Autostart              bool
 	Requests               []pairing.Request
 	Grants                 []pairing.Grant
 }
 
 type Actions struct {
-	Snapshot  func() Snapshot
-	SetSite   func(string) error
-	Autostart func(bool) error
-	Decide    func(pairing.Request, bool) error
-	Revoke    func(string) error
-	OpenSite  func() error
+	Snapshot       func() Snapshot
+	SetSite        func(string) error
+	Autostart      func(bool) error
+	Decide         func(pairing.Request, bool) error
+	Revoke         func(string) error
+	OpenSite       func() error
+	CheckUpdate    func() error
+	DownloadUpdate func(bool) error
+	UpdateFolder   func() error
+	Diagnostics    func() string
+	PrepareRemoval func(bool, bool) error
 }
 
 func Activity(state string) string {

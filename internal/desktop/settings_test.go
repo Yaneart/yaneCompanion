@@ -47,7 +47,7 @@ func TestSettingsExactOriginAndPersistence(t *testing.T) {
 }
 
 func TestSettingsRejectCorruptOrUnsafeFiles(t *testing.T) {
-	for _, data := range []string{"{", `{"site":"http://media.example"}`, string(make([]byte, 4097))} {
+	for _, data := range []string{"{", `{"site":"http://media.example"}`, `{"site":"https://watch.example","schema":2}`, string(make([]byte, 4097))} {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "desktop.json"), []byte(data), 0600); err != nil {
 			t.Fatal(err)

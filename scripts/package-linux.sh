@@ -75,6 +75,9 @@ pre_remove() { /usr/lib/yanecompanion/package-guard; }
 EOF
 bsdtar --uid 0 --gid 0 -c --zstd -f "$output/yanecompanion-bin-$version-1-x86_64.pkg.tar.zst" -C "$stage" .PKGINFO .INSTALL usr
 mkdir -p "$output/aur"
+# A previous release's .SRCINFO must never accompany a newly generated recipe.
+# The owner regenerates it with makepkg after choosing the final release URL.
+rm -f "$output/aur/.SRCINFO"
 cp "$stage/.INSTALL" "$output/aur/yanecompanion-bin.install"
 if [ -n "$base" ]; then source="${base%/}/$archive"; else source="$archive"; fi
 cat > "$output/aur/PKGBUILD" <<EOF

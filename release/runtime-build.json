@@ -1,12 +1,12 @@
 {
-    "helperVersion":  "0.2.0-dev",
+    "helperVersion":  "0.3.0-dev",
     "toolchain":  "go1.27.3",
     "sourceCommit":  null,
     "developmentBundle":  true,
     "repeatedBuildIdentical":  true,
     "inputLockSHA256":  "a6a4fb14f8396dc05f4fd1ac671e0e074abb931d8f0ba09f28ac859651de6324",
     "platformSHA256":  {
-                           "windows-amd64":  "9eac690e3fdc48a79df6a719eedcd6cfe1ce80fdc5283ef3ba4e9c8b8426f387",
-                           "linux-amd64":  "924e496a6adcdab6d69eec587ecc0d4a202003d446040b3817209bf1a2cc4500"
+                           "linux-amd64":  "62aa0b02720c0e640493bda539aa5a6954f6b66ac2466b9e7a991719c71f8961",
+                           "windows-amd64":  "23397544cfad43cb0718275e7e87ccaabbd9a29cdd96acf79f87ed9c2134320c"
                        }
 }

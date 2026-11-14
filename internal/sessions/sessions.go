@@ -97,6 +97,7 @@ type Manager struct {
 	now         func() time.Time
 	fatal       chan error
 	media       *media.Service
+	closing     bool
 }
 type Controller struct {
 	ID        string    `json:"controllerId"`
@@ -124,6 +125,27 @@ func (m *Manager) Activity() string {
 		return ""
 	}
 	return m.active.snapshot.State
+}
+
+// DiagnosticError returns a code only; no file, torrent or grant identity.
+func (m *Manager) DiagnosticError() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active == nil {
+		return ""
+	}
+	return m.active.snapshot.Error
+}
+
+// Quiesce atomically excludes a raced admission before a user-requested removal.
+func (m *Manager) Quiesce() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active != nil {
+		return denied(409, "UPDATE_PLAYBACK_ACTIVE")
+	}
+	m.closing = true
+	return nil
 }
 func (m *Manager) Errors() <-chan error { return m.fatal }
 func secret(n int) string               { return hex.EncodeToString(random(n)) }
@@ -242,6 +264,7 @@ func (m *Manager) prune() {
 }
 func (m *Manager) Close() {
 	m.mu.Lock()
+	m.closing = true
 	if m.active != nil {
 		s := m.active
 		m.stop(s)
@@ -274,6 +297,9 @@ func (m *Manager) replay(c *controller, key, route string, body []byte) (*record
 func (m *Manager) Create(origin, token, key string, body []byte, l locator.Locator) (Admission, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closing {
+		return Admission{}, denied(503, "ENGINE_UNAVAILABLE")
+	}
 	c, err := m.auth(origin, token)
 	if err != nil {
 		return Admission{}, err

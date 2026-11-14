@@ -10,6 +10,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"yanecompanion/internal/diagnostics"
+	"yanecompanion/release"
 )
 
 var user32 = windows.NewLazySystemDLL("user32.dll")
@@ -69,7 +71,7 @@ type notifyIcon struct {
 }
 
 func ReportError(err error) {
-	win("MessageBoxW", 0, wide("Не удалось запустить yaneCompanion.\n"+err.Error()), wide("yaneCompanion"), 0x10)
+	win("MessageBoxW", 0, wide("Не удалось запустить yaneCompanion.\n"+diagnostics.Message(err)), wide("yaneCompanion"), 0x10)
 }
 
 func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool) error {
@@ -90,6 +92,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	controls := map[uintptr]uintptr{}
 	var snapshot Snapshot
 	lastRequest, lastGrants, lastStatus := "", "", ""
+	var setView func(bool)
 	var currentRequestID string
 	setText := func(handle uintptr, value string) { win("SetWindowTextW", handle, wide(value)) }
 	showWindow := func() { win("ShowWindow", window, 9); win("SetForegroundWindow", window) }
@@ -117,6 +120,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	taskbarCreated := uint32(win("RegisterWindowMessageW", wide("TaskbarCreated")))
 	refresh := func() {
 		snapshot = actions.Snapshot()
+		setText(controls[207], snapshot.Update)
 		status := snapshot.Status + "\r\n" + snapshot.Activity
 		if status != lastStatus {
 			setText(controls[201], status)
@@ -127,6 +131,9 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			r := snapshot.Requests[0]
 			requestText = r.Origin + "\r\nКод: " + r.Code + "   (до " + r.ExpiresAt.Local().Format("15:04:05") + ")\r\nСверьте адрес и код с сайтом."
 			if currentRequestID != r.RequestID {
+				if setView != nil {
+					setView(false)
+				}
 				showWindow()
 				currentRequestID = r.RequestID
 			}
@@ -210,6 +217,28 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			return 0
 		case 0x111:
 			switch w & 0xffff {
+			case 130:
+				setView(true)
+			case 131:
+				setView(false)
+			case 301:
+				report(actions.CheckUpdate())
+			case 302, 303:
+				err := actions.DownloadUpdate(w&0xffff == 303)
+				if err != nil {
+					report(errors.New(diagnostics.Message(err)))
+				}
+			case 304:
+				report(actions.UpdateFolder())
+			case 305:
+				win("MessageBoxW", window, wide(actions.Diagnostics()+"\nCtrl+C — скопировать отчёт."), wide("Диагностика yaneCompanion"), 0x40)
+			case 308:
+				if win("MessageBoxW", window, wide("Очистить выбранные данные и выйти? После этого удалите программу через настройки ОС или пакетный менеджер. Без флажков данные сохраняются."), wide("Подготовка к удалению"), 0x124) == 6 {
+					err := actions.PrepareRemoval(win("SendMessageW", controls[306], 0xf0, 0, 0) != 0, win("SendMessageW", controls[307], 0xf0, 0, 0) != 0)
+					if err != nil {
+						report(errors.New(diagnostics.Message(err)))
+					}
+				}
 			case 102:
 				value := make([]uint16, 1024)
 				win("GetWindowTextW", controls[101], uintptr(unsafe.Pointer(&value[0])), uintptr(len(value)))
@@ -274,6 +303,32 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	add("BUTTON", "Отозвать доступ", 108, 20, 508, 190, 32, 0x10000)
 	add("BUTTON", "Скрыть в трей", 109, 20, 560, 190, 32, 0x10000)
 	add("BUTTON", "Выход", 110, 480, 560, 140, 32, 0x10000)
+	add("BUTTON", "Обслуживание", 130, 225, 560, 235, 32, 0x10000)
+	add("STATIC", "yaneCompanion "+release.Version+" · API 1.0", 206, 20, 16, 600, 38, 0)
+	add("STATIC", "", 207, 20, 65, 600, 86, 0)
+	for i, text := range []string{"Проверить обновления", "Скачать полный пакет", "Скачать предыдущую версию", "Открыть папку пакетов", "Диагностика"} {
+		add("BUTTON", text, uintptr(301+i), 20, 160+i*43, 600, 32, 0x10000)
+	}
+	add("STATIC", "Перед удалением: выберите данные для очистки. Без флажков сохраняются все данные.", 208, 20, 385, 600, 42, 0)
+	add("BUTTON", "Удалить кэш просмотра и пакеты обновления", 306, 20, 431, 600, 30, 0x10003)
+	add("BUTTON", "Удалить сохранённые подключения сайтов", 307, 20, 465, 600, 30, 0x10003)
+	add("BUTTON", "Подготовить удаление и выйти", 308, 20, 508, 600, 32, 0x10000)
+	add("BUTTON", "Назад", 131, 225, 560, 235, 32, 0x10000)
+	setView = func(maintenance bool) {
+		for id, handle := range controls {
+			if id == 109 || id == 110 {
+				continue
+			}
+			isMaintenance := id >= 206 && id <= 208 || id >= 301 && id <= 308 || id == 131
+			visible := isMaintenance == maintenance
+			command := 0
+			if visible {
+				command = 5
+			}
+			win("ShowWindow", handle, command)
+		}
+	}
+	setView(false)
 	refresh()
 	addTray()
 	defer shell32.NewProc("Shell_NotifyIconW").Call(2, uintptr(unsafe.Pointer(&tray)))

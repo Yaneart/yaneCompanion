@@ -47,6 +47,8 @@ func run() error {
 	origin := flags.String("origin", "", "explicit HTTPS development origin (no production default)")
 	developmentOrigin := flags.String("dev-origin", "", "explicit HTTP localhost/127.0.0.1/[::1] development origin")
 	hidden := flags.Bool("hidden", false, "start desktop window hidden (explicit autostart)")
+	clearCache := flags.Bool("cache", false, "explicitly remove owned session/update cache with clean-data")
+	clearPairings := flags.Bool("pairings", false, "explicitly remove saved pairings with clean-data")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -66,6 +68,15 @@ func run() error {
 	paths, err := config.Resolve()
 	if err != nil {
 		return err
+	}
+	if command == "clean-data" {
+		if (!*clearCache && !*clearPairings) || *origin != "" || *developmentOrigin != "" || *hidden {
+			return fmt.Errorf("INVALID_COMMAND")
+		}
+		return app.CleanData(paths, app.Removal{Cache: *clearCache, Pairings: *clearPairings})
+	}
+	if *clearCache || *clearPairings {
+		return fmt.Errorf("INVALID_COMMAND")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

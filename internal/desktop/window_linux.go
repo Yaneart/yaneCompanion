@@ -11,49 +11,54 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"yanecompanion/internal/diagnostics"
+	"yanecompanion/release"
 )
 
 // GTK 3 remains available on Debian 12, Ubuntu 24.04 and Arch. No C compiler,
 // browser engine or GTK development headers are needed on the viewer's machine.
 type gtkAPI struct {
-	InitCheck     func(uintptr, uintptr) int32                 `symbol:"gtk_init_check"`
-	WindowNew     func(int32) uintptr                          `symbol:"gtk_window_new"`
-	WindowTitle   func(uintptr, string)                        `symbol:"gtk_window_set_title"`
-	WindowSize    func(uintptr, int32, int32)                  `symbol:"gtk_window_set_default_size"`
-	WindowPresent func(uintptr)                                `symbol:"gtk_window_present"`
-	WindowIcon    func(uintptr, string, uintptr) int32         `symbol:"gtk_window_set_icon_from_file"`
-	BoxNew        func(int32, int32) uintptr                   `symbol:"gtk_box_new"`
-	Pack          func(uintptr, uintptr, int32, int32, uint32) `symbol:"gtk_box_pack_start"`
-	Add           func(uintptr, uintptr)                       `symbol:"gtk_container_add"`
-	Border        func(uintptr, uint32)                        `symbol:"gtk_container_set_border_width"`
-	LabelNew      func(string) uintptr                         `symbol:"gtk_label_new"`
-	LabelSet      func(uintptr, string)                        `symbol:"gtk_label_set_text"`
-	LabelWrap     func(uintptr, int32)                         `symbol:"gtk_label_set_line_wrap"`
-	LabelSelect   func(uintptr, int32)                         `symbol:"gtk_label_set_selectable"`
-	LabelAlign    func(uintptr, float32)                       `symbol:"gtk_label_set_xalign"`
-	EntryNew      func() uintptr                               `symbol:"gtk_entry_new"`
-	EntrySet      func(uintptr, string)                        `symbol:"gtk_entry_set_text"`
-	EntryGet      func(uintptr) uintptr                        `symbol:"gtk_entry_get_text"`
-	EntryLimit    func(uintptr, int32)                         `symbol:"gtk_entry_set_max_length"`
-	ButtonNew     func(string) uintptr                         `symbol:"gtk_button_new_with_label"`
-	CheckNew      func(string) uintptr                         `symbol:"gtk_check_button_new_with_label"`
-	CheckGet      func(uintptr) int32                          `symbol:"gtk_toggle_button_get_active"`
-	CheckSet      func(uintptr, int32)                         `symbol:"gtk_toggle_button_set_active"`
-	ComboNew      func() uintptr                               `symbol:"gtk_combo_box_text_new"`
-	ComboAdd      func(uintptr, string)                        `symbol:"gtk_combo_box_text_append_text"`
-	ComboClear    func(uintptr)                                `symbol:"gtk_combo_box_text_remove_all"`
-	ComboIndex    func(uintptr) int32                          `symbol:"gtk_combo_box_get_active"`
-	ShowAll       func(uintptr)                                `symbol:"gtk_widget_show_all"`
-	Hide          func(uintptr)                                `symbol:"gtk_widget_hide"`
-	Sensitive     func(uintptr, int32)                         `symbol:"gtk_widget_set_sensitive"`
-	Focus         func(uintptr)                                `symbol:"gtk_widget_grab_focus"`
-	MenuNew       func() uintptr                               `symbol:"gtk_menu_new"`
-	MenuItem      func(string) uintptr                         `symbol:"gtk_menu_item_new_with_label"`
-	MenuLabel     func(uintptr, string)                        `symbol:"gtk_menu_item_set_label"`
-	MenuAppend    func(uintptr, uintptr)                       `symbol:"gtk_menu_shell_append"`
-	Main          func()                                       `symbol:"gtk_main"`
-	Quit          func()                                       `symbol:"gtk_main_quit"`
-	Destroy       func(uintptr)                                `symbol:"gtk_widget_destroy"`
+	NotebookNew    func() uintptr                               `symbol:"gtk_notebook_new"`
+	NotebookAppend func(uintptr, uintptr, uintptr) int32        `symbol:"gtk_notebook_append_page"`
+	NotebookPage   func(uintptr, int32)                         `symbol:"gtk_notebook_set_current_page"`
+	InitCheck      func(uintptr, uintptr) int32                 `symbol:"gtk_init_check"`
+	WindowNew      func(int32) uintptr                          `symbol:"gtk_window_new"`
+	WindowTitle    func(uintptr, string)                        `symbol:"gtk_window_set_title"`
+	WindowSize     func(uintptr, int32, int32)                  `symbol:"gtk_window_set_default_size"`
+	WindowPresent  func(uintptr)                                `symbol:"gtk_window_present"`
+	WindowIcon     func(uintptr, string, uintptr) int32         `symbol:"gtk_window_set_icon_from_file"`
+	BoxNew         func(int32, int32) uintptr                   `symbol:"gtk_box_new"`
+	Pack           func(uintptr, uintptr, int32, int32, uint32) `symbol:"gtk_box_pack_start"`
+	Add            func(uintptr, uintptr)                       `symbol:"gtk_container_add"`
+	Border         func(uintptr, uint32)                        `symbol:"gtk_container_set_border_width"`
+	LabelNew       func(string) uintptr                         `symbol:"gtk_label_new"`
+	LabelSet       func(uintptr, string)                        `symbol:"gtk_label_set_text"`
+	LabelWrap      func(uintptr, int32)                         `symbol:"gtk_label_set_line_wrap"`
+	LabelSelect    func(uintptr, int32)                         `symbol:"gtk_label_set_selectable"`
+	LabelAlign     func(uintptr, float32)                       `symbol:"gtk_label_set_xalign"`
+	EntryNew       func() uintptr                               `symbol:"gtk_entry_new"`
+	EntrySet       func(uintptr, string)                        `symbol:"gtk_entry_set_text"`
+	EntryGet       func(uintptr) uintptr                        `symbol:"gtk_entry_get_text"`
+	EntryLimit     func(uintptr, int32)                         `symbol:"gtk_entry_set_max_length"`
+	ButtonNew      func(string) uintptr                         `symbol:"gtk_button_new_with_label"`
+	CheckNew       func(string) uintptr                         `symbol:"gtk_check_button_new_with_label"`
+	CheckGet       func(uintptr) int32                          `symbol:"gtk_toggle_button_get_active"`
+	CheckSet       func(uintptr, int32)                         `symbol:"gtk_toggle_button_set_active"`
+	ComboNew       func() uintptr                               `symbol:"gtk_combo_box_text_new"`
+	ComboAdd       func(uintptr, string)                        `symbol:"gtk_combo_box_text_append_text"`
+	ComboClear     func(uintptr)                                `symbol:"gtk_combo_box_text_remove_all"`
+	ComboIndex     func(uintptr) int32                          `symbol:"gtk_combo_box_get_active"`
+	ShowAll        func(uintptr)                                `symbol:"gtk_widget_show_all"`
+	Hide           func(uintptr)                                `symbol:"gtk_widget_hide"`
+	Sensitive      func(uintptr, int32)                         `symbol:"gtk_widget_set_sensitive"`
+	Focus          func(uintptr)                                `symbol:"gtk_widget_grab_focus"`
+	MenuNew        func() uintptr                               `symbol:"gtk_menu_new"`
+	MenuItem       func(string) uintptr                         `symbol:"gtk_menu_item_new_with_label"`
+	MenuLabel      func(uintptr, string)                        `symbol:"gtk_menu_item_set_label"`
+	MenuAppend     func(uintptr, uintptr)                       `symbol:"gtk_menu_shell_append"`
+	Main           func()                                       `symbol:"gtk_main"`
+	Quit           func()                                       `symbol:"gtk_main_quit"`
+	Destroy        func(uintptr)                                `symbol:"gtk_widget_destroy"`
 }
 
 func loadFunctions(handle uintptr, value any) {
@@ -64,7 +69,7 @@ func loadFunctions(handle uintptr, value any) {
 	}
 }
 
-func ReportError(err error) { fmt.Fprintln(os.Stderr, "yaneCompanion:", err) }
+func ReportError(err error) { fmt.Fprintln(os.Stderr, "yaneCompanion:", diagnostics.Message(err)) }
 
 func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool) error {
 	runtime.LockOSThread()
@@ -96,7 +101,9 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	gtk.WindowIcon(window, icon, 0)
 	box := gtk.BoxNew(1, 12)
 	gtk.Border(box, 20)
-	gtk.Add(window, box)
+	notebook := gtk.NotebookNew()
+	gtk.Add(window, notebook)
+	gtk.NotebookAppend(notebook, box, gtk.LabelNew("Подключения"))
 	pack := func(parent, child uintptr) { gtk.Pack(parent, child, 0, 0, 0) }
 	label := func(text string) uintptr {
 		w := gtk.LabelNew(text)
@@ -114,11 +121,17 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	gtk.EntrySet(entry, actions.Snapshot().Site)
 	gtk.Pack(row, entry, 1, 1, 0)
 	feedback := uintptr(0)
+	serviceFeedback := uintptr(0)
 	report := func(err error) {
+		text := ""
 		if err != nil {
-			gtk.LabelSet(feedback, "Не удалось выполнить действие. "+err.Error())
-		} else {
-			gtk.LabelSet(feedback, "")
+			text = "Не удалось выполнить действие. " + err.Error()
+		}
+		if feedback != 0 {
+			gtk.LabelSet(feedback, text)
+		}
+		if serviceFeedback != 0 {
+			gtk.LabelSet(serviceFeedback, text)
 		}
 	}
 	button := func(parent uintptr, text string, fn func()) uintptr {
@@ -236,6 +249,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			enabled = 1
 			requestText = r.Origin + "\nКод: " + r.Code + "   (до " + r.ExpiresAt.Local().Format("15:04:05") + ")"
 			if lastRequest != r.RequestID {
+				gtk.NotebookPage(notebook, 0)
 				gtk.WindowPresent(window)
 				lastRequest = r.RequestID
 			}
@@ -255,6 +269,51 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			lastGrants = key
 		}
 	}
+	box = gtk.BoxNew(1, 12)
+	gtk.Border(box, 20)
+	gtk.NotebookAppend(notebook, box, gtk.LabelNew("Обслуживание"))
+	label("yaneCompanion " + release.Version + " · API 1.0")
+	updateLabel := label("")
+	button(box, "Проверить обновления", func() { report(actions.CheckUpdate()) })
+	for _, previous := range []bool{false, true} {
+		text := "Скачать полный пакет"
+		if previous {
+			text = "Скачать предыдущую версию"
+		}
+		button(box, text, func() {
+			err := actions.DownloadUpdate(previous)
+			if err != nil {
+				err = errors.New(diagnostics.Message(err))
+			}
+			report(err)
+		})
+	}
+	button(box, "Открыть папку пакетов", func() { report(actions.UpdateFolder()) })
+	button(box, "Диагностика", func() {
+		panel := gtk.WindowNew(0)
+		gtk.WindowTitle(panel, "Диагностика yaneCompanion")
+		gtk.WindowSize(panel, 480, 300)
+		text := gtk.LabelNew(actions.Diagnostics())
+		gtk.LabelSelect(text, 1)
+		gtk.Border(panel, 20)
+		gtk.Add(panel, text)
+		gtk.ShowAll(panel)
+	})
+	label("Перед удалением: выберите данные для очистки. Без флажков сохраняются все данные.")
+	clearCache := gtk.CheckNew("Удалить кэш просмотра и пакеты обновления")
+	clearPairings := gtk.CheckNew("Удалить сохранённые подключения сайтов")
+	pack(box, clearCache)
+	pack(box, clearPairings)
+	button(box, "Подготовить удаление и выйти", func() {
+		err := actions.PrepareRemoval(gtk.CheckGet(clearCache) != 0, gtk.CheckGet(clearPairings) != 0)
+		if err != nil {
+			report(errors.New(diagnostics.Message(err)))
+		}
+	})
+	label("Затем удалите программу через настройки ОС или пакетный менеджер.")
+	serviceFeedback = label("")
+	previousRefresh := refresh
+	refresh = func() { previousRefresh(); gtk.LabelSet(updateLabel, snapshot.Update) }
 	gtk.ShowAll(window)
 	gtk.Focus(entry)
 	refresh()

@@ -28,9 +28,13 @@ func OpenSettings(directory string) (*Settings, error) {
 		}
 		data, err := os.ReadFile(s.path)
 		var value struct {
-			Site string `json:"site"`
+			Site   string `json:"site"`
+			Schema int    `json:"schema,omitempty"`
 		}
 		if err != nil || json.Unmarshal(data, &value) != nil {
+			return nil, errors.New("SETTINGS_UNAVAILABLE")
+		}
+		if value.Schema != 0 && value.Schema != 1 {
 			return nil, errors.New("SETTINGS_UNAVAILABLE")
 		}
 		s.site = value.Site

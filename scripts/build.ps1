@@ -1,4 +1,4 @@
-param([ValidateSet('windows-amd64','linux-amd64')][string]$Target = 'windows-amd64', [string]$Go = 'go', [string]$SiteOrigin = '', [string]$Version = '0.2.0-dev')
+param([ValidateSet('windows-amd64','linux-amd64')][string]$Target = 'windows-amd64', [string]$Go = 'go', [string]$SiteOrigin = '', [string]$Version = '0.3.0-dev', [string]$UpdateFeedUrl = '', [string]$UpdatePublicKey = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $goVersion = & $Go version
@@ -9,6 +9,12 @@ $env:GOMODCACHE = Join-Path $projectRoot '.tools\go-mod'
 $linkFlags = '-buildid= -s -w'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-dev)?$') { throw 'Invalid helper version' }
 $linkFlags += ' -X=yanecompanion/release.Version=' + $Version
+if ([bool]$UpdateFeedUrl -ne [bool]$UpdatePublicKey) { throw 'UpdateFeedUrl and UpdatePublicKey must be supplied together' }
+if ($UpdateFeedUrl) {
+  $feedUri = $null
+  if (-not [Uri]::TryCreate($UpdateFeedUrl, [UriKind]::Absolute, [ref]$feedUri) -or $feedUri.Scheme -ne 'https' -or -not $feedUri.Host -or $feedUri.UserInfo -or $feedUri.Query -or $feedUri.Fragment -or $UpdateFeedUrl -match '[\s"'']' -or $UpdatePublicKey -cnotmatch '^[a-f0-9]{64}$') { throw 'Update feed requires HTTPS and a pinned hex Ed25519 public key' }
+  $linkFlags += ' -X=yanecompanion/internal/update.FeedURL=' + $UpdateFeedUrl + ' -X=yanecompanion/internal/update.PublicKey=' + $UpdatePublicKey
+}
 if ($SiteOrigin) {
   if ($SiteOrigin -notmatch '^https://[a-zA-Z0-9.:-]+$') { throw 'SiteOrigin must be an exact HTTPS origin' }
   $linkFlags += ' -X=yanecompanion/internal/desktop.SiteOrigin=' + $SiteOrigin

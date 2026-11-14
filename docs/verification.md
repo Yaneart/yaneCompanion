@@ -1,5 +1,61 @@
 # Проверки и границы runtime
 
+## LC-011 — обновление, диагностика и удаление (2026-11-14)
+
+Реализация `0.3.0-dev` подготовлена по отдельной команде. Один независимый tester
+дал PASS после исправлений и перепроверки исходных reproductions; этап ожидает
+пользовательской приёмки/коммитов и не закрыт. Production signing/publication,
+реальные Win11/Debian/Ubuntu/Arch desktop/HTTPS/LNA/30 min остаются внешними gates.
+
+- Focused Go: `go test ./internal/update ./internal/diagnostics ./internal/app
+  ./internal/sessions ./internal/api ./internal/desktop ./cmd/release-manifest
+  -run 'TestLC011|TestDesktop|TestSettings|TestStopRevisionOneAndRevokePreventLatePublication|TestLeaseAndExpiredOperationTombstone|TestOwnershipReplayAndFileSelection|TestHeartbeatKeepsOnlyOwnedIdleMetadataAlive' -count=1`.
+  Проверены подпись/чужой signer, expiry/replay/sequence collision, unsafe metadata,
+  corrupt/oversized/interrupted packages и retry, redirects, явный rollback,
+  settings schema/API/downgrade guards, redaction, выборы очистки/оба lock и
+  отсутствие website/management update routes. Offline owner tool подписывает и
+  повторно проверяет реальные fixture bytes; corruption не заменяет good output.
+- Те же focused Linux test binaries выполнены non-root в Debian/Ubuntu/Arch
+  userspaces без внешней сети. Symlink-root confinement проверяется там; Windows
+  symlink test может пропускаться без privilege. GTK host стартует под Xvfb,
+  получает navigation на maintenance notebook и штатно выходит; это не native
+  desktop/Wayland/full-tray acceptance.
+- Windows 10 native API fixture: существующий consent/restart/revoke/Exit test
+  дополнен переключением maintenance view, проверкой unconfigured feed без
+  остановки runtime, возвратом к подключениям. Startup-error singleton также PASS.
+  Реальный Inno fixture с override minimum 19041 устанавливается и переустанавливается
+  в отдельный путь, сохраняет site; silent uninstall сохраняет pairings/cache,
+  явный `clean-data --cache --pairings` удаляет только выбранное. Protocol registration
+  после fixture удалена. Production installer по-прежнему требует Win11 22000;
+  эти Windows 10 результаты не являются Win11 PASS.
+- yaneMedia: 16 companion connection и 9 local torrent tests PASS; scoped TypeScript
+  import graphs трёх изменённых entrypoints — 0 diagnostics, changed-file
+  oxlint/Prettier PASS. Playwright в отдельном guest context: старый helper
+  вызывает только GET /hello, версия/инструкция обновления и redacted connection
+  diagnostics видны; API major 2 просит обновить сайт. 1280×900 и 360×640 без
+  горизонтального переполнения, диалог прокручивается; mobile screenshot просмотрен.
+  Browser hello в этих version checks — явные fixtures, не production update server.
+- Windows/Linux development packages собраны; test signatures не объявляются
+  production подписью. Нет полного project test/lint/typecheck/build yaneMedia,
+  Git staging/commit/push, публикации или перехода к LC-012.
+- Tester подтвердил два P2 в cleanup: потерю checkpoint при совпадающих XDG
+  state/cache roots и traversal внутренней symlink `updates` в посторонние данные.
+  Main исправил оба: удаляются только owned `current`/`previous`, checkpoint и
+  unknown files сохраняются; symlink/non-directory отвергаются, identity открытого
+  каталога сверяется до удаления. Permanent regressions покрывают State==Cache,
+  Config==State==Cache, повторный cleanup, внутреннюю/внешнюю symlink.
+  Focused Windows и Debian/Ubuntu/Arch PASS; tester заново воспроизвёл оба исходных
+  CLI случая на свежем Linux host и подтвердил сохранение данных/явный отказ.
+  Windows symlink variants SKIP privilege, Linux variants реально выполнены.
+  Также исправлен P3 stale AUR `.SRCINFO`: новая генерация PKGBUILD удаляет её,
+  owner выпуска генерирует актуальную после выбора URL. Открытых подтверждённых
+  дефектов после финальной перепроверки tester нет.
+
+Нужны владелец Ed25519 key/pinned public key, Authenticode certificate/timestamp,
+реальный feed/packages hosting и AUR публикация. Ротация ключа — новый trusted
+пакет. Подписанный тестовый manifest с ephemeral key доказывает реализацию verifier,
+а не доверие к ещё не опубликованным packages. Инструкции — [установка](installation.md).
+
 ## LC-010 — desktop и установщики (2026-11-09)
 
 Реализация подготовлена по команде пользователя; этап **не принят и не закрыт**.

@@ -7,15 +7,17 @@ param(
   [string]$SignTool = '',
   [string]$SigningThumbprint = '',
   [string]$TimestampUrl = '',
+  [string]$UpdateFeedUrl = '',
+  [string]$UpdatePublicKey = '',
   [switch]$Release
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$version = '0.2.0'
-if ($Release -and (-not $SiteOrigin -or -not $ReleaseBaseUrl)) { throw 'Release requires SiteOrigin and ReleaseBaseUrl' }
+$version = '0.3.0'
+if ($Release -and (-not $SiteOrigin -or -not $ReleaseBaseUrl -or -not $UpdateFeedUrl -or -not $UpdatePublicKey)) { throw 'Release requires SiteOrigin, ReleaseBaseUrl, UpdateFeedUrl and UpdatePublicKey' }
 if ($ReleaseBaseUrl -and $ReleaseBaseUrl -notmatch '^https://[^\s"''?#]+$') { throw 'ReleaseBaseUrl must be HTTPS without query or fragment' }
 $helperVersion = if ($Release) { $version } else { "$version-dev" }
-& (Join-Path $PSScriptRoot 'build.ps1') -Target $Target -Go $Go -SiteOrigin $SiteOrigin -Version $helperVersion
+& (Join-Path $PSScriptRoot 'build.ps1') -Target $Target -Go $Go -SiteOrigin $SiteOrigin -Version $helperVersion -UpdateFeedUrl $UpdateFeedUrl -UpdatePublicKey $UpdatePublicKey
 & (Join-Path $PSScriptRoot 'assemble.ps1') -Target $Target
 $bundlePath = Join-Path $projectRoot ('dist\' + $Target)
 $outputPath = Join-Path $projectRoot 'dist\packages'
@@ -51,7 +53,10 @@ if ($Target -eq 'windows-amd64') {
   & docker run --rm --mount "type=bind,source=$projectRoot,target=/project" yanecompanion-packager sh /project/scripts/package-linux.sh /project/dist/linux-amd64 /project/dist/packages $version $ReleaseBaseUrl
   if ($LASTEXITCODE -ne 0) { throw 'Linux packaging failed' }
 }
-$artifacts = Get-ChildItem -LiteralPath $outputPath -File | Where-Object { $_.Name -match '\.(exe|deb|zst|gz)$' }
+$packageNames = @("yanecompanion-$version-windows-amd64-setup.exe", "yanecompanion_${version}_amd64.deb", "yanecompanion-bin-$version-1-x86_64.pkg.tar.zst", "yanecompanion-$version-linux-amd64.tar.gz")
+$artifacts = Get-ChildItem -LiteralPath $outputPath -File | Where-Object { $_.Name -in $packageNames }
 $manifest = @($artifacts | ForEach-Object { [ordered]@{ name=$_.Name; size=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
-[IO.File]::WriteAllText((Join-Path $outputPath 'packages.json'), (([ordered]@{ version=$version; signedWindowsRelease=[bool]($Release -and $Target -eq 'windows-amd64'); artifacts=$manifest } | ConvertTo-Json -Depth 5) + "`n"), [Text.UTF8Encoding]::new($false))
+$windowsPackage = Join-Path $outputPath "yanecompanion-$version-windows-amd64-setup.exe"
+$signedWindowsRelease = (Test-Path -LiteralPath $windowsPackage) -and (Get-AuthenticodeSignature -LiteralPath $windowsPackage).Status -eq 'Valid'
+[IO.File]::WriteAllText((Join-Path $outputPath 'packages.json'), (([ordered]@{ version=$version; signedWindowsRelease=$signedWindowsRelease; artifacts=$manifest } | ConvertTo-Json -Depth 5) + "`n"), [Text.UTF8Encoding]::new($false))
 Write-Output "Packages ready: $outputPath (not published)"

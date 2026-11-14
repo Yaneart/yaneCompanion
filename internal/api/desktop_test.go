@@ -4,6 +4,18 @@ import (
 	"testing"
 )
 
+func TestLC011MaintenanceHasNoBrowserOrManagementRoute(t *testing.T) {
+	h := pairingHandler(t)
+	for _, path := range []string{"/v1/update", "/v1/diagnostics", "/v1/clean-data", "/local/update", "/local/clean-data", "/local/manage/update", "/local/manage/clean-data"} {
+		for _, origin := range []string{website, selfOrigin, ""} {
+			w := call(h, "POST", path, origin, h.LocalToken, "{}")
+			if w.Code < 400 {
+				t.Fatalf("maintenance route exposed: %s", path)
+			}
+		}
+	}
+}
+
 func TestDesktopShowRequiresLocalProofAndNoBrowserOrigin(t *testing.T) {
 	h := pairingHandler(t)
 	shows := 0

@@ -155,6 +155,26 @@ func TestInstalledDesktopConsentAndLifecycle(t *testing.T) {
 	if code, _ := call("GET", "/v1/pairings/current", "https://watch.example", result.Token, nil); code != 401 {
 		t.Fatal("native revoke did not invalidate grant")
 	}
+	// Maintenance stays available inside the native window and checking an
+	// unconfigured release fails explicitly without affecting the runtime.
+	ui("ShowWindow", window, 9)
+	click(130)
+	if ui("IsWindowVisible", ui("GetDlgItem", window, 301)) == 0 || ui("IsWindowVisible", ui("GetDlgItem", window, 101)) != 0 {
+		t.Fatal("maintenance view did not switch")
+	}
+	click(301)
+	wait(func() bool {
+		value := make([]uint16, 2048)
+		ui("SendMessageW", ui("GetDlgItem", window, 207), 0xd, uintptr(len(value)), uintptr(unsafe.Pointer(&value[0])))
+		return bytes.Contains([]byte(windows.UTF16ToString(value)), []byte("пока не опубликованы"))
+	})
+	if code, _ := call("GET", "/hello", "https://watch.example", "", nil); code != 200 {
+		t.Fatal("update check stopped the helper")
+	}
+	click(131)
+	if ui("IsWindowVisible", ui("GetDlgItem", window, 101)) == 0 {
+		t.Fatal("connections view did not return")
+	}
 	click(110)
 	if err := cmd.Wait(); err != nil {
 		t.Fatal(err)

@@ -358,7 +358,9 @@ PowerShell и встроенный curl. Portable Go можно распаков
 `sh scripts/engine.sh` и host через `sh scripts/build.sh`; Docker media recipe
 одинакова для обеих платформ.
 
-Engine — **MatriX.148-companion.4**, сборка из закреплённого MatriX.148, без GST.
+Engine — **MatriX.148-companion.5**, сборка из закреплённого MatriX.148, без GST.
+Точные media ranges ограничивают чтение и приоритеты pieces; отмена HTTP-запроса
+прерывает ожидание torrent-reader, освобождая его для повторного выбора субтитров.
 `cmd/patch-engine` применяет небольшие изменения с проверкой контекста к upstream
 и его `tsynik/torrent v1.2.34`, не изменяя module cache. SHA-256 источников, patch
 recipe/policy и готовых binaries находятся в lock; `go mod verify` проверяет

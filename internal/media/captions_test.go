@@ -89,6 +89,17 @@ func TestRealTracksAndCaptions(t *testing.T) {
 	}
 	p := prepare(0, 0)
 	t.Cleanup(p.Close)
+	for _, tc := range []struct {
+		position, delay float64
+		content         string
+	}{{0, -60, "TEXT 030"}, {190, 60, "LONG DELAY"}, {10, 60, "WEBVTT"}, {191, -60, "WEBVTT"}} {
+		p.captions.delay = &tc.delay
+		data, start, end, err := p.extractResource(ctx, probe.Text[0], nil, tc.position)
+		if err != nil || !strings.Contains(string(data), tc.content) || start != tc.position || end != math.Min(probe.Duration, tc.position+30) {
+			t.Fatalf("window position=%g delay=%g: %g..%g %v %s", tc.position, tc.delay, start, end, err, data)
+		}
+	}
+	p.captions.delay = nil
 	data, _, _, err := p.extractResource(ctx, probe.Text[0], nil, 0)
 	if err != nil || !strings.Contains(string(data), "TEXT 030") {
 		t.Fatal("negative delay -60 requires the 60..62s cue at position0", err)
@@ -163,7 +174,7 @@ func TestRealTracksAndCaptions(t *testing.T) {
 	t.Cleanup(refill.Close)
 	refillName := "text-" + probe.Text[0].Ref + ".vtt"
 	refill.mu.Lock()
-	refill.captions.cache[refillName] = resource{initialText, 0, 120}
+	refill.captions.cache[refillName] = resource{data: initialText, start: 0, end: 120}
 	refill.captions.bytes = len(initialText)
 	refill.status.Bytes += int64(len(initialText))
 	refill.mu.Unlock()

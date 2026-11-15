@@ -17,7 +17,7 @@ var locked []byte
 
 var Version = "0.3.0-dev"
 
-const EngineVersion = "MatriX.148-companion.4"
+const EngineVersion = "MatriX.148-companion.5"
 const MediaVersion = "9.0.2"
 
 type Artifact struct {

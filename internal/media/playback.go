@@ -24,6 +24,7 @@ type SourceTimeline struct {
 	AbsoluteAnchor float64 `json:"absoluteAnchorSeconds"`
 	MediaAnchor    float64 `json:"mediaAnchorSeconds"`
 	Duration       float64 `json:"durationSeconds"`
+	VideoEnd       float64 `json:"videoEndSeconds,omitempty"`
 	WindowEnd      float64 `json:"windowEndSeconds"`
 	Ended          bool    `json:"ended"`
 }
@@ -53,23 +54,25 @@ type OutputVideo struct {
 	Mode string `json:"mode"`
 }
 type Playback struct {
-	mu               sync.Mutex
-	ctx              context.Context
-	cancel           context.CancelFunc
-	done, ready      chan struct{}
-	closeOnce        sync.Once
-	root             *os.Root
-	directory        string
-	input            *inputBridge
-	status           PlaybackStatus
-	segments         []segment
-	target           int
-	position, window float64
-	confirmed        bool
-	lastChange       time.Time
-	readers          chan struct{}
-	openFiles        map[string]int
-	captions         *captions
+	mu                 sync.Mutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	done, ready        chan struct{}
+	closeOnce          sync.Once
+	failure            error
+	root               *os.Root
+	directory          string
+	input              *inputBridge
+	status             PlaybackStatus
+	segments           []segment
+	target             int
+	position, window   float64
+	videoEnd, audioEnd float64
+	confirmed          bool
+	lastChange         time.Time
+	readers            chan struct{}
+	openFiles          map[string]int
+	captions           *captions
 }
 
 func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, probe *Probe, target Target, client []ClientMedia) (*Playback, error) {
@@ -78,6 +81,12 @@ func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, pr
 	if err != nil {
 		return nil, err
 	}
+	duration := probe.playbackDuration(audio)
+	seekEnd := duration
+	if probe.videoEnd > 0 {
+		seekEnd = math.Min(seekEnd, probe.videoEnd)
+	}
+	target.Position = math.Min(target.Position, math.Max(0, seekEnd-.01))
 	ctx, cancel := context.WithCancel(ctx)
 	directory := filepath.Join(s.Directory, "media-"+randomRef())
 	if err = os.MkdirAll(directory, 0700); err != nil {
@@ -91,6 +100,10 @@ func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, pr
 		return nil, err
 	}
 	p := &Playback{ctx: ctx, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{}), root: root, directory: directory, position: target.Position, window: WindowSeconds(probe.Video.Bitrate, 8), lastChange: time.Now(), readers: make(chan struct{}, 8), openFiles: map[string]int{}}
+	p.videoEnd = probe.videoEnd
+	if audio != nil {
+		p.audioEnd = audio.end
+	}
 	p.captions = &captions{service: s, hash: hash, file: file, probe: probe, busy: make(chan struct{}, 1), cache: map[string]resource{}}
 	b, err := bridge(ctx, s.Backend, hash, file, 0)
 	if err != nil {
@@ -123,7 +136,7 @@ func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, pr
 		return nil, ErrUnsupported
 	}
 	anchor = math.Max(0, anchor)
-	p.status = PlaybackStatus{Timeline: SourceTimeline{Mode: "windowed-vod", Continuous: true, AbsoluteAnchor: anchor, Duration: probe.Duration, WindowEnd: anchor}, Ranges: []AvailableRange{}}
+	p.status = PlaybackStatus{Timeline: SourceTimeline{Mode: "windowed-vod", Continuous: true, AbsoluteAnchor: anchor, Duration: duration, VideoEnd: probe.videoEnd, WindowEnd: anchor}, Ranges: []AvailableRange{}}
 	p.status.Output.Video = OutputVideo{Video: probe.Video, Mode: "copy"}
 	if audio != nil {
 		out := &OutputAudio{Codec: audio.Codec, Channels: audio.Channels, Mode: "copy"}
@@ -151,18 +164,38 @@ func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, pr
 	} else {
 		args = append(args, "-an")
 	}
+	if audio != nil {
+		// Keep both tracks in one timescale across the final audio-only moofs.
+		// Otherwise an HLS demuxer can reset its timestamp offset on that switch.
+		scale := 48000
+		if copyAudio {
+			scale = audio.SampleRate
+		}
+		args = append(args, "-video_track_timescale", strconv.Itoa(scale))
+	}
 	// An OS pipe provides cross-platform backpressure even for tiny low-bitrate
 	// inputs already buffered by the demuxer. One muxer/audio clock lives to EOF.
-	args = append(args, "-sn", "-dn", "-threads", "2", "-f", "mp4", "-strict", "experimental", "-movflags", "empty_moov+default_base_moof+frag_keyframe", "-frag_duration", "2000000", "-min_frag_duration", "1000000", "pipe:1")
+	// MP4 chapters create an implicit text track even with explicit A/V maps and
+	// -sn/-dn. Keep that whole-film clock out of the fragment's media tracks.
+	args = append(args, "-sn", "-dn", "-map_chapters", "-1", "-threads", "2", "-f", "mp4", "-strict", "experimental", "-movflags", "empty_moov+default_base_moof+frag_keyframe", "-frag_duration", "2000000", "-min_frag_duration", "1000000", "pipe:1")
 	go p.run(s.Runner, args)
 	timer := time.NewTimer(time.Until(startupDeadline))
 	defer timer.Stop()
 	select {
 	case <-p.ready:
+		p.restoreCaptionCache()
 		return p, nil
 	case <-p.done:
-		err := p.Status().Error
+		status := p.Status()
+		if status.Error == "" && status.Timeline.Ended && len(status.Ranges) > 0 {
+			p.restoreCaptionCache()
+			return p, nil
+		}
+		err := status.Error
 		p.Close()
+		if p.failure != nil {
+			return nil, p.failure
+		}
 		if err == "" {
 			err = "MEDIA_FAILED"
 		}
@@ -201,6 +234,7 @@ func (p *Playback) run(runner *Runner, args []string) {
 		case err := <-result:
 			p.mu.Lock()
 			if err != nil && p.ctx.Err() == nil {
+				p.failure = err
 				if p.status.Error == "" {
 					p.status.Error = "MEDIA_FAILED"
 				}
@@ -343,11 +377,14 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 			}
 
 		case "moof":
-			if clock.video == 0 || audioTail {
+			if clock.video == 0 {
 				return errPlaylist
 			}
 			timing, err := clock.fragment(data)
 			onlyAudio := errors.Is(err, errAudioOnly)
+			if audioTail && (!onlyAudio || p.audioEnd <= p.videoEnd+.1) {
+				return errPlaylist
+			}
 			if err != nil && !onlyAudio {
 				return err
 			}
@@ -371,15 +408,36 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 				}
 				p.mu.Lock()
 				atEnd := p.status.Timeline.AbsoluteAnchor+pendingTime.end-anchor >= p.status.Timeline.Duration-.1
+				videoEnded := p.videoEnd > 0 && p.status.Timeline.AbsoluteAnchor+pendingTime.end-anchor >= p.videoEnd-.1
+				audioEnd := p.status.Timeline.AbsoluteAnchor + timing.allEnd - anchor
 				p.mu.Unlock()
-				// Only one <=100ms/64KiB encoder tail at absolute EOF may accompany the
-				// pending video fragment. No invented video clock, discarded audio or
-				// mutation of a fragment already served to a browser.
-				if pending == nil || !atEnd || timing.minDecode < pendingTime.end-.1 || timing.minPTS < pendingTime.end-.1 || timing.allEnd > pendingTime.end+.1 || timing.allEnd-timing.minDecode > .1 || len(data)+len(mdat) > 64<<10 || len(pending)+len(data)+len(mdat) > segmentLimit {
-					return ErrUnsupported
+				// A known longer selected audio track can continue after its video.
+				// Keep its real sample clocks in bounded fragments; never add video
+				// samples or discard the audio to match the other track's duration.
+				if videoEnded && p.audioEnd > p.videoEnd+.1 {
+					pendingTime.end = math.Max(pendingTime.end, pendingTime.allEnd)
+					if pending == nil || math.Abs(timing.minDecode-pendingTime.end) > .1 || timing.minPTS < pendingTime.end-.1 || audioEnd > p.audioEnd+.1 || timing.allEnd-timing.minDecode > 3 {
+						return ErrUnsupported
+					}
+					if err := publish(pending, pendingTime); err != nil {
+						return err
+					}
+					pending = nil
+					if err := p.wait(ctx); err != nil {
+						return err
+					}
+					timing.start, timing.end = timing.minDecode, timing.allEnd
+					pending, pendingTime = append(data, mdat...), timing
+				} else {
+					// Only one <=100ms/64KiB encoder tail at absolute EOF may accompany the
+					// pending video fragment. No invented video clock, discarded audio or
+					// mutation of a fragment already served to a browser.
+					if pending == nil || !atEnd || timing.minDecode < pendingTime.end-.1 || timing.minPTS < pendingTime.end-.1 || timing.allEnd > pendingTime.end+.1 || timing.allEnd-timing.minDecode > .1 || len(data)+len(mdat) > 64<<10 || len(pending)+len(data)+len(mdat) > segmentLimit {
+						return ErrUnsupported
+					}
+					pending = append(pending, data...)
+					pending = append(pending, mdat...)
 				}
-				pending = append(pending, data...)
-				pending = append(pending, mdat...)
 				audioTail = true
 			} else {
 				pending = append(data, mdat...)
@@ -467,11 +525,24 @@ func (p *Playback) Status() PlaybackStatus {
 	s.Ranges = append([]AvailableRange{}, s.Ranges...)
 	return s
 }
-func (p *Playback) Confirm(position float64) error {
+func (p *Playback) Confirm(position float64, textDelay ...float64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !finite(position) || len(p.segments) == 0 || position < p.segments[0].Start-.1 || position > p.status.Timeline.WindowEnd+.1 || position > p.status.Timeline.Duration+.1 {
 		return errors.New("INVALID_POSITION")
+	}
+	if len(textDelay) > 1 || len(textDelay) == 1 && (!finite(textDelay[0]) || math.Abs(textDelay[0]) > 60) {
+		return errors.New("INVALID_POSITION")
+	}
+	if len(textDelay) == 1 && p.captions != nil {
+		delay := textDelay[0]
+		p.captions.delay = &delay
+		shared := &p.captions.probe.captionCache
+		shared.Lock()
+		if shared.hash == p.captions.hash && shared.file == p.captions.file {
+			shared.delay = &delay
+		}
+		shared.Unlock()
 	}
 	p.position = math.Max(p.segments[0].Start, position)
 	p.confirmed = true

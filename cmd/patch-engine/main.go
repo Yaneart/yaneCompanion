@@ -56,6 +56,17 @@ func patch(source, dependency, guard string) error {
 		return os.WriteFile(path, data, 0600)
 	}
 	changes := [][3]string{
+		{"torr/stream.go", "reader := t.NewReader(file)", "reader := t.NewReader(file, companionRange(req.Header.Get(\"Range\"), file.Length())...)"},
+		{"torr/stream.go", "\tdefer t.CloseReader(reader)", "\treader.SetRequestContext(req.Context())\n\tdefer t.CloseReader(reader)"},
+		{"torr/torrent.go", "func (t *Torrent) NewReader(file *torrent.File) *torrstor.Reader {", "func (t *Torrent) NewReader(file *torrent.File, bounds ...int64) *torrstor.Reader {"},
+		{"torr/torrent.go", "reader := t.cache.NewReader(file)", "reader := t.cache.NewReader(file, bounds...)"},
+		{"torr/storage/torrstor/cache.go", "func (c *Cache) NewReader(file *torrent.File) *Reader {\n\treturn newReader(file, c)\n}", "func (c *Cache) NewReader(file *torrent.File, bounds ...int64) *Reader {\n\treturn newReader(file, c, bounds...)\n}"},
+		{"torr/storage/torrstor/reader.go", "\tfile      *torrent.File", "\tfile      *torrent.File\n\t// Immutable finite range, initialized before this reader enters the cache.\n\tbounded bool\n\trangeStart, rangeEnd int64\n\treadContext func([]byte) (int,error)"},
+		{"torr/storage/torrstor/reader.go", "func newReader(file *torrent.File, cache *Cache) *Reader {", "func newReader(file *torrent.File, cache *Cache, bounds ...int64) *Reader {"},
+		{"torr/storage/torrstor/reader.go", "\tr.file = file", "\tr.file = file\n\tif len(bounds) == 2 && bounds[0] >= 0 && bounds[1] > bounds[0] && bounds[1] <= file.Length() {\n\t\tr.bounded = true\n\t\tr.rangeStart, r.rangeEnd = bounds[0], bounds[1]\n\t}"},
+		{"torr/storage/torrstor/reader.go", "\t\tn, err = r.Reader.Read(p)", "\t\tn, err = r.readRequest(p)"},
+		{"torr/storage/torrstor/reader.go", "func (r *Reader) SetReadahead(length int64) {", "func (r *Reader) SetReadahead(length int64) {\n\tif r.bounded { length = 0 }"},
+		{"torr/storage/torrstor/reader.go", "func (r *Reader) getOffsetRange() (int64, int64) {", "func (r *Reader) getOffsetRange() (int64, int64) {\n\tif r.bounded { return r.rangeStart, r.rangeEnd-1 }"},
 		{"web/api/stream.go", "\tdata := \"\"\n\n\tnotAuth :=", "\tnotAuth :="},
 		{"web/api/stream.go", "\ttor := torr.GetTorrent(spec.InfoHash.HexString())\n\tif tor != nil {\n\t\ttitle = tor.Title\n\t\tposter = tor.Poster\n\t\tdata = tor.Data\n\t\tcategory = tor.Category\n\t}\n\tif tor == nil || tor.Stat == state.TorrentInDB {\n\t\ttor, err = torr.AddTorrent(spec, title, poster, data, category)\n\t\tif err != nil {\n\t\t\tc.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{\"error\": fmt.Errorf(\"error adding torrent: %v\", err).Error()})\n\t\t\treturn\n\t\t}\n\t}", "\t// Streaming cannot create a torrent, including after a cancelled request.\n\ttor := torr.GetTorrent(spec.InfoHash.HexString())\n\tif tor == nil || tor.Stat == state.TorrentInDB {\n\t\tc.AbortWithStatus(http.StatusNotFound)\n\t\treturn\n\t}"},
 		{"go.mod", "github.com/anacrolix/torrent v1.59.1 => github.com/tsynik/torrent v1.2.34", "github.com/anacrolix/torrent v1.59.1 => ./companion-torrent"},
@@ -86,6 +97,24 @@ func patch(source, dependency, guard string) error {
 	}
 	for _, change := range changes {
 		if err := edit(change[0], change[1], change[2]); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{"range.go", "range_test.go"} {
+		data, err := os.ReadFile(filepath.Join(guard, "testdata", name))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(source, "torr", "companion_"+name), data, 0600); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{"range_reader.go", "range_reader_test.go"} {
+		data, err := os.ReadFile(filepath.Join(guard, "testdata", name))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(source, "torr", "storage", "torrstor", "companion_"+name), data, 0600); err != nil {
 			return err
 		}
 	}

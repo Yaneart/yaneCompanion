@@ -296,6 +296,24 @@ func (m *Manager) replay(c *controller, key, route string, body []byte) (*record
 }
 func (m *Manager) Create(origin, token, key string, body []byte, l locator.Locator) (Admission, error) {
 	m.mu.Lock()
+	if !m.closing && m.active != nil && m.active.snapshot.State == "stopping" {
+		if _, err := m.auth(origin, token); err != nil {
+			m.mu.Unlock()
+			return Admission{}, err
+		}
+		// Revocation is immediate, but the old worker still owns the device
+		// until its readers and engine Drop finish. Wait outside the lock;
+		// all authorization, replay and ownership checks below run again.
+		done := m.active.done
+		m.mu.Unlock()
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-done:
+		case <-timer.C:
+		}
+		timer.Stop()
+		m.mu.Lock()
+	}
 	defer m.mu.Unlock()
 	if m.closing {
 		return Admission{}, denied(503, "ENGINE_UNAVAILABLE")

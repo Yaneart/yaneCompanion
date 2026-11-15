@@ -6,10 +6,16 @@ $suffix = ''; if ($Target -eq 'windows-amd64') { $suffix = '.exe' }
 $destination = Join-Path $projectRoot ('dist\' + $Target)
 $tools = Join-Path $destination 'tools'
 New-Item -ItemType Directory -Force -Path $tools | Out-Null
+function Copy-ChangedTool([string]$Source, [string]$Destination) {
+  # An unchanged verified tool may be in use by the normal running helper.
+  if (-not (Test-Path -LiteralPath $Destination) -or (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash) {
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+  }
+}
 $sourceEngine = Join-Path $projectRoot ('.tools\engine\' + $Target + '\torrserver' + $suffix)
-Copy-Item -LiteralPath $sourceEngine -Destination (Join-Path $tools ('torrserver' + $suffix)) -Force
+Copy-ChangedTool $sourceEngine (Join-Path $tools ('torrserver' + $suffix))
 foreach ($name in @('ffmpeg','ffprobe')) {
-  Copy-Item -LiteralPath (Join-Path $projectRoot ('.tools\media\' + $Target + '\' + $name + $suffix)) -Destination $tools -Force
+  Copy-ChangedTool (Join-Path $projectRoot ('.tools\media\' + $Target + '\' + $name + $suffix)) (Join-Path $tools ($name + $suffix))
 }
 foreach ($artifact in $manifest.platforms.$Target) {
   if ((Get-FileHash -LiteralPath (Join-Path $tools $artifact.name) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $artifact.sha256) { throw "Built media differs from lock: $($artifact.name)" }

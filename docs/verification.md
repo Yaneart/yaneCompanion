@@ -1,10 +1,232 @@
+# Cleanup / user acceptance pending вЂ” 2026-11-15
+
+User requested removal of temporary work artifacts before making commits manually.
+His own playback verification is deferred to next time and has NOT been performed.
+Prior automated checks are not user acceptance. Temporary cold-index, playback-bugs
+and torrent-review directories were removed; source/tests/docs, toolchains and built
+packages remain. No staging/commit/push performed by Codex. Already staged temporary
+Media files require the user to refresh staging before committing.
+
+---
+# Playback navigation / selected duration / EOF — 2026-11-15
+
+Canonical final evidence and limits: sibling
+[Media report](../../yaneMedia/docs/playback-bugs-2026-11-15.md).
+Registry Player0.1.22 is published by its owner and installed/delivered in Media.
+The app also synchronously commits a replacement source before resolving navigation.
+
+Companion now retains session-wide source revisions; selects duration from known
+selected AV ends; preserves verified long audio tails with existing backpressure;
+uses the selected audio timescale for video muxing; and bounds seeks by known last
+video frames without truncating full audio duration. Unknown stream ends retain
+legacy behavior. New admission waits up to2s for acknowledged stopping-session
+cleanup, then rechecks authorization/replay/ownership. Active viewers remain busy.
+
+Focused real FFmpeg, peer-backed Arrival EOF/decode (both audio tracks), boundary,
+paused-window/segment budget, copied44.1kHz, API duration/stale progress and cleanup
+concurrency checks PASS. Independent tester PASS. Chromium MediaView/movie EOF and
+three final series transitions PASS. Full suites were not run. Cold caption422
+and unavailable torrent metadata are not declared solved; improvements stay paused.
+
+Final Windows/Linux0.3.0-dev hosts built twice identically; release/runtime-build.json
+records hashes. Four0.3.0 development packages rebuilt sequentially, sizes/SHA256
+verified against dist/packages/packages.json. Unsigned Windows; no publication.
+Normal helper3184 still runs its09:55 image: user tray Exit/restart is required.
+Its profile/pairing were not touched. No git staging/commit/push by Codex.
+
+---
+
+# Complete-Cues cold read concurrency — 2026-11-15
+
+Canonical results: sibling yaneMedia/docs/public-torrent-checkpoint.md, latest top.
+The full-Cues subtitle path now shares the existing four-cluster scheduler with
+the incomplete-Cues scan. Complete indexes retain a shared8MiB/512 request budget;
+scan retains128MiB/8192, with shared256blocks/2MiB output and the existing30s deadline.
+No engine/tool/dependency change. Partial text is never returned after failure.
+
+Focused Windows and nonroot/read-only/network-none Debian index/range/parallel/
+cancellation/deadline and bundled FFmpeg SRT/ASS decode passed. Full-index tests
+check four concurrent requests, aggregate original budgets, byte/order equality
+with sequential blocks, cancellation without partial publication, and retry.
+No agents or full-project verification. Registry player0.1.21 was installed in Media
+and delivered to its frontend container; actual subtitles-loading label verified.
+
+Opt-in TestTorrentColdIndexedWindow (internal/media/cold_index_test.go) takes
+YANE_CAPTION_REVIEW pointing to private JSON {locator,fileIndex,stream,positions}
+plus YANE_TEST_EXECUTABLE. Every case uses a new actual engine and empty cache.
+On the same Severance file, stream9, cold index+window+decode at1800:
+sequential5.621s vs concurrent4.385s; both99,482B/28reads, same188B decoded text.
+At0 sequential2.828s vs concurrent3.083s. Both algorithms passed under the current
+swarm; the previous30s timeout was NOT reproduced. Do not claim universal speedup
+or that concurrency alone accounts for old84s vs new11s browser seek.
+
+Actual isolated browser+real engine+FFmpeg with new source: Full selection0.695s,
+seek1800 with captions11.110s and playing, paused seek3000 with captions20.660s,
+position3000/paused/captions ready/error null. All11 text GET returned200;
+the paused seek's caption request took7.796s and correctly showed the new label.
+Vite5174, private API45724/canonical test routing, real backend test-origin forwarding;
+manual input used after stand UI catalog failure. Not native/HTTPS/LNA/first-start
+speed acceptance. Stable fast first cold playback remains open.
+
+Browser closed, isolated pairing revoked204, stand/Vite/engine stopped; final
+2197range reads/542,943,301B/active0. Normal viewer profile/processes untouched.
+Host reproducibility and packages refer to current release/runtime-build.json and
+dist/packages/packages.json. Existing engine5/FFmpeg/dependency lock unchanged.
+
+---
+
 # Проверки и границы runtime
+
+## Peer-backed фильм и сериал (2026-11-15)
+
+Проверка через отдельный engine/API profile и isolated Playwright context:
+[актуальные результаты и ограничения](../../yaneMedia/docs/public-torrent-checkpoint.md).
+Arrival1080p: Full83 ms, cold seek3500 с captions5.887 s, audio change3.596 s —
+ошибка text не повторилась. SeveranceS01E01 BDRip1080p: два реальных пира,
+~0.36–0.49 MiB/s; cold text и retry30 s/422, seek1800 с text84.028 s. После
+прогрева старого окна retry151 ms успешен. Ошибка первого холодного запроса ОТКРЫТА.
+Прямое чтение полного Matroska index быстро, извлечение1800..1830 ожидало engine
+range до30 s ещё до FFmpeg decode. Не считать общий интернет или все раздачи причиной.
+
+Новый opt-in `TestTorrentReviewBrowser` использует private45724 и отдельный engine,
+не занимает обычный45723 и не читает профиль пользователя. Test context явно
+forwarded45723->45724; torrent/output не mocked. Stand завершён после controller
+cleanup и revoke test pairing; active range readers0. Это не native/HTTPS acceptance.
+Production Companion/engine sources и готовые bundles в этой проверке не менялись.
+
+## Recovery после холодной перемотки (2026-11-14, 23:46 MSK)
+
+Текущий handoff: [Public checkpoint](../../yaneMedia/docs/public-torrent-checkpoint.md).
+Этот раздел заменяет прежние выводы о recovery и atomic metadata ниже.
+
+Engine MatriX.148-companion.5 ограничивает reads/priorities точными single ranges
+и передаёт HTTP context в native torrent ReadContext. Реальный изолированный engine:
+после timeout до исправления оставались четыре readers, после — ноль.
+Неполные Cues читаются максимум четырьмя workers с общими прежними 128 МиБ/
+8192 requests/30 s, 256 blocks/2 МиБ output. Полный индекс 8 МиБ/512; resources8 МиБ.
+Завершённые проверенные кластеры, в том числе без видимых реплик, сохраняют offsets
+после сетевого timeout. Незавершённые кластеры и partial text не публикуются;
+explicit abort/replacement/structural failure не публикуют partial metadata.
+
+Новый source field `textWindowSeconds:30` включает optional progress
+`textDelaySeconds` [-60,+60] под прежними source-revision/origin/controller guards.
+Окно соответствует применённому delay; index учитывает длинные overlap cues,
+fallback читает на120 s раньше. Кеш учитывает delay и область покрытия. Frontend
+сериализует progress, сообщает delay до refill, обновляет по5 s confirmed time и
+обрабатывает delay на паузе; legacy helper новый field не получает. Проверенное
+пустое VTT получает невидимую cue, как существующий bounded fallback.
+
+PASS Windows и non-root/network-none/read-only Debian: focused caption/index/API,
+long overlap/delay +/-60, invalid delay, aggregate parallel budgets, timeout retry
+против explicit abort, grant rotation; engine range/read/cancel checks.
+Windows bundled engine raw-auth PASS. Frontend14 adapter +2 player +7 lifecycle,
+changed-entrypoint types0 и changed-file lint PASS. Полных проверок не выполнялось.
+
+Browser с registry0.1.20, ЯВНЫЙ MP4/HTTP fixture: host seek3500->3600, HTTP422,
+повтор новой дорожки с empty VTT — position3600/intent paused/pending null/error null,
+captions ready. Это controlled recovery, не peer-backed browser acceptance.
+Реальные peers17-ГБ «Оппенгеймера»: cold Full3500 достиг30 s, retry22.847 s успешен;
+повторы161/138 ms (1440 B/36 ranges), Forced без реплик valid VTT42 B. Первый
+timeout сохранил29 verified locations, readers0. Pieces8 МиБ,1–2 сидера; ~188 МБ
+peer data против ~7 МБ range input объясняют, почему cold Full ещё может быть долгим.
+Не заявлять стабильную быструю первую Full, native/HTTPS/fullscreen/30 min PASS.
+
+Новый engine также прошёл отдельный real-peer AV smoke: probe, preparation0=4.576 s,
+preparation3500=55.114 s, measured anchor3491.405/window end3507.420/range1/error empty.
+Это worker check без браузера и не подтверждает быструю холодную AV-перемотку.
+
+Оба engine/host target воспроизведены побайтно; четыре unsigned packages подготовлены,
+не опубликованы. Обычный helper/engine не останавливались, pairing сохранён;
+для применения нужен ручной restart. Home/LC013 не начаты, player publish не нужен.
+
+## Индексированные субтитры и переключение дорожек (2026-11-14)
+
+Companion использует подход Home: range metadata/блоки MKV -> маленький
+subtitle-only MKV -> bundled FFmpeg. Для полного Cues сохранены 8 МиБ / 512
+range requests; metadata суммарно 2 МиБ, блок 64 КиБ, выход 2 МиБ. Старые MKV
+с CueTime/CueClusterPosition, но без CueRelativePosition/CueDuration, обходятся
+по заголовкам только нужных кластеров с пропуском крупных AV payloads. Этот
+fallback использует прежние 128 МиБ/job и 30 s, дополнительно ограничен 8192
+requests и буфером read-ahead 16 КиБ. Байты неудачной попытки вычитаются из
+оставшегося бюджета обычного demux fallback. Лимиты ресурсов не увеличены.
+
+Проверяются stream/codec/track identity, часы, длительность, границы элементов,
+CodecState, lacing и конечный размер. Неизвестная/небезопасная структура оставляет
+bounded demux fallback. FFmpeg обрабатывает codec private data и encodings;
+растровые/неизвестные форматы не объявляются поддержанными.
+
+Индекс, проверенные смещения и готовые окна привязаны к probe/hash/file и переживают
+замену AV producer при audio/seek. Grants/URLs по-прежнему меняются; новые playback
+учитывают кэш в прежних 8 МиБ ресурсов и общем media cache. Только успешно завершённый
+обход сохраняет новые смещения, отмена не публикует частичный текст. При быстром
+выборе следующая дорожка ждёт до 500 ms завершения отменённого запроса. Processing
+timeout теперь возвращает HTTP-ошибку, не закрывая write deadline преждевременно.
+
+Focused Windows: PASS 12 named caption/index/API tests (включая 11 unsafe-index
+subcases); отдельно PASS audio conversion, chapter regression, audio tail, malformed
+MP4 и seek byte budget. Focused Linux: тот же media subset два раза PASS в non-root,
+network-none, read-only Debian container с настоящими bundled FFmpeg/ffprobe.
+Первый Linux-прогон один раз вернул UNSUPPORTED_MEDIA при подготовке fixture на
+40 s; одиночный повтор и затем два полных focused повтора прошли без изменения
+алгоритма подготовки. Это не native Linux/desktop acceptance.
+
+`TestRealIndexedSubtitleDecode` проверяет SRT/ASS, сдвиг origin на час, длинную
+перекрывающуюся cue, повторное использование индекса и реальные muxed tracks:
+две дорожки потребовали 8880 bytes / 141 ranges. Sparse fixture 300 s: первоначально
+около 12 МиБ чтения из 49 МиБ AV source, повтор после сохранения позиций <32 КиБ;
+проверены byte/request bounds и отсутствие частичных locations после ошибки.
+`TestTrackResourceGrantBoundary` теперь проверяет audio replacement: старый URL
+становится 404, новая ссылка читает сохранённые captions.
+
+Реальный ordinary Public MediaView + registry player 0.1.20 + изолированный engine
+на второй 17-ГБ раздаче «Оппенгеймера»: Forced/Full LineFilm/English загрузились,
+video продолжало идти; повторные switches/Off около 17–40 ms, настоящий abort
+SDH -> English без зависшего pending. Playing Bravo -> Сербин с English сохранил
+position/intent/cues (~4.3 s). Финальный прогон с сохранением найденных offsets:
+Forced на123 s ~221 ms; paused seek300 сохранил текст/paused (~11.4 s), paused
+Original audio сохранил300/text (~12.1 s), click Play прошёл302.08 без ошибки.
+Измерения включают сеть и не являются SLA.
+
+**Ограничение:** холодные полные дорожки в ряде реальных запусков снова достигали
+30 s extraction deadline (видео/controls оставались работоспособны). Поэтому
+быстрая стабильная первая загрузка полной дорожки после произвольного seek пока
+не принята. Доизвлечение при недоступных peer pieces, native/production HTTPS,
+4K/HDR/fullscreen/30min этим не закрыты. Сохранённые offsets/decoded windows можно
+перенести в Home; отдельный AV/HLS audio path — следующая архитектурная возможность,
+не реализованная этим изменением.
+
+Host Windows/Linux повторно совпали byte-for-byte; пакеты 0.3.0-dev остаются
+неподписанными и неопубликованными. Reproducibility script теперь записывает
+фактическую Version. Assembly не перезаписывает идентичные проверенные tools,
+занятые обычным helper; Windows installer исключает build backup `*.exe~`.
+Обычный helper/profile не остановлены; для использования нового host нужен restart.
+
+## Исправление локального просмотра файлов с главами (2026-11-14)
+
+На первой раздаче «Дюны: Часть вторая» из «Лучших» воспроизведён `MEDIA_FAILED`:
+metadata и probe проходили, но автоматическое копирование глав в fragmented MP4
+добавляло chapter text track с длительностью всего фильма. Строгий разбор AV fragment
+отклонял эту дорожку. Выходной FFmpeg теперь использует `-map_chapters -1` вместе с
+явным отображением видео/звука; ограничения часов, длительности и бюджета не ослаблены.
+Поведение флага — в [официальной документации FFmpeg](https://ffmpeg.org/ffmpeg.html#Advanced-options).
+
+`TestRealPlaybackExcludesChapterTracks` создаёт локальный MKV с H.264, PCM и двумя
+главами, проверяет их наличие на входе и ровно две AV tracks на выходе, video copy,
+AAC conversion и подготовку с позиций 0/63.3 s. Без исправления воспроизводит
+`MEDIA_FAILED`; с исправлением PASS на Windows и non-root Debian container с bundled tools.
+Дополнительно PASS: `TestRealAudioConversionKeepsVideo`, `TestRealAudioTailClocks`,
+`TestMP4RejectsMalformedLengthsAndMissingClocks`, `TestBudgetBeforeRequestedSeekFailsWithoutPublishingReady`.
+
+Реальные первая раздача «Дюны» и первые две «Оппенгеймера» из того же «Лучших»
+прошли isolated engine metadata/probe/подготовку непустого измеренного AV prefix после
+исправления. Пользовательский профиль не использовался как тестовая фикстура;
+полный просмотр/production HTTPS этим не подтверждены. Сортировка и сайт не менялись.
 
 ## LC-011 — обновление, диагностика и удаление (2026-11-14)
 
 Реализация `0.3.0-dev` подготовлена по отдельной команде. Один независимый tester
-дал PASS после исправлений и перепроверки исходных reproductions; этап ожидает
-пользовательской приёмки/коммитов и не закрыт. Production signing/publication,
+дал PASS после исправлений и перепроверки исходных reproductions; этап принят
+пользователем, коммиты media `e80680a` / helper `546bfe5` проверены. Production signing/publication,
 реальные Win11/Debian/Ubuntu/Arch desktop/HTTPS/LNA/30 min остаются внешними gates.
 
 - Focused Go: `go test ./internal/update ./internal/diagnostics ./internal/app

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"yanecompanion/internal/engine"
@@ -39,14 +40,26 @@ type Audio struct {
 	Label       string `json:"label"`
 	Language    string `json:"language,omitempty"`
 	Default     bool   `json:"default"`
+	end         float64
 }
 type Probe struct {
-	Duration float64  `json:"durationSeconds"`
-	Video    Video    `json:"video"`
-	Audio    []Audio  `json:"audioTracks"`
-	Text     []Text   `json:"textTracks"`
-	Fonts    []Font   `json:"-"`
-	Outputs  []string `json:"outputs"`
+	Duration     float64  `json:"durationSeconds"`
+	Video        Video    `json:"video"`
+	Audio        []Audio  `json:"audioTracks"`
+	Text         []Text   `json:"textTracks"`
+	Fonts        []Font   `json:"-"`
+	Outputs      []string `json:"outputs"`
+	sourceStart  float64
+	videoEnd     float64
+	captionCache struct {
+		sync.Mutex
+		checked   bool
+		hash      string
+		file      engine.File
+		value     *matroskaIndex
+		resources map[string]resource
+		delay     *float64
+	}
 }
 type Service struct {
 	Runner    *Runner
@@ -120,9 +133,12 @@ type rawStream struct {
 	Channels   int    `json:"channels"`
 	SampleRate string `json:"sample_rate"`
 	ExtraSize  int    `json:"extradata_size"`
+	Start      string `json:"start_time"`
+	Duration   string `json:"duration"`
 	Tags       struct {
 		Title    string `json:"title"`
 		Language string `json:"language"`
+		Duration string `json:"DURATION"`
 	} `json:"tags"`
 	Disposition struct {
 		Attached int `json:"attached_pic"`
@@ -141,12 +157,17 @@ func parseProbe(data []byte) (*Probe, error) {
 		Format  struct {
 			Duration string `json:"duration"`
 			Bitrate  string `json:"bit_rate"`
+			Start    string `json:"start_time"`
 		} `json:"format"`
 	}
 	if json.Unmarshal(data, &raw) != nil || len(raw.Streams) == 0 || len(raw.Streams) > 64 {
 		return nil, ErrUnsupported
 	}
 	p := &Probe{Duration: number(raw.Format.Duration), Audio: []Audio{}, Text: []Text{}, Outputs: []string{"original"}}
+	p.sourceStart = number(raw.Format.Start)
+	if !finite(p.sourceStart) || math.Abs(p.sourceStart) > 7*24*3600 {
+		return nil, ErrUnsupported
+	}
 	if !finite(p.Duration) || p.Duration <= 0 || p.Duration > 7*24*3600 {
 		return nil, ErrUnsupported
 	}
@@ -161,6 +182,7 @@ func parseProbe(data []byte) (*Probe, error) {
 				return nil, ErrUnsupported
 			}
 			a := Audio{Index: st.Index, Ref: randomRef(), Codec: st.Codec, Channels: st.Channels, SampleRate: int(number(st.SampleRate))}
+			a.end = streamEnd(st, p.sourceStart, p.Duration)
 			a.Label, a.Language, a.Default = label(st.Tags.Title, fmt.Sprintf("Audio %d", len(p.Audio)+1)), language(st.Tags.Language), st.Disposition.Default == 1
 			if a.SampleRate > 0 && a.SampleRate <= 48000 && a.Channels <= 8 {
 				switch {
@@ -206,11 +228,59 @@ func parseProbe(data []byte) (*Probe, error) {
 			bitrate = 0
 		}
 		p.Video = Video{st.Index, st.Codec, mime, st.Width, st.Height, fps, bitrate, depth, hdr}
+		p.videoEnd = streamEnd(st, p.sourceStart, p.Duration)
 	}
 	if !found {
 		return nil, ErrUnsupported
 	}
 	return p, nil
+}
+
+// Matroska DURATION tags contain the last packet's end timestamp. Numeric
+// stream durations instead start at start_time. Normalize both to source time.
+func streamEnd(st rawStream, start, total float64) float64 {
+	end := 0.0
+	if st.Tags.Duration != "" {
+		parts := strings.Split(st.Tags.Duration, ":")
+		if len(parts) != 3 {
+			return 0
+		}
+		h, e1 := strconv.ParseUint(parts[0], 10, 16)
+		m, e2 := strconv.ParseUint(parts[1], 10, 8)
+		s, e3 := strconv.ParseFloat(parts[2], 64)
+		if e1 != nil || e2 != nil || e3 != nil || m >= 60 || !finite(s) || s < 0 || s >= 60 {
+			return 0
+		}
+		end = float64(h)*3600 + float64(m)*60 + s - start
+	} else {
+		duration, err := strconv.ParseFloat(st.Duration, 64)
+		if err != nil || !finite(duration) || duration <= 0 {
+			return 0
+		}
+		streamStart := start
+		if st.Start != "" {
+			streamStart, err = strconv.ParseFloat(st.Start, 64)
+			if err != nil || !finite(streamStart) {
+				return 0
+			}
+		}
+		end = streamStart + duration - start
+	}
+	if !finite(end) || end <= 0 || end > total+.1 {
+		return 0
+	}
+	return math.Min(end, total)
+}
+
+func (p *Probe) playbackDuration(audio *Audio) float64 {
+	if p.videoEnd <= 0 || audio != nil && audio.end <= 0 {
+		return p.Duration
+	}
+	end := p.videoEnd
+	if audio != nil {
+		end = math.Max(end, audio.end)
+	}
+	return end
 }
 
 func compatibleVideo(st rawStream) bool {

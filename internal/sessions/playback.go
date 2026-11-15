@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"math"
 	"sort"
 	"time"
 
@@ -13,12 +14,13 @@ import (
 )
 
 type Source struct {
-	ID       string         `json:"id"`
-	Revision int            `json:"revision"`
-	Type     string         `json:"type"`
-	URL      string         `json:"url"`
-	Audio    []media.Audio  `json:"audioTracks"`
-	Text     []TextResource `json:"textTracks"`
+	ID         string         `json:"id"`
+	Revision   int            `json:"revision"`
+	Type       string         `json:"type"`
+	URL        string         `json:"url"`
+	Audio      []media.Audio  `json:"audioTracks"`
+	Text       []TextResource `json:"textTracks"`
+	TextWindow int            `json:"textWindowSeconds"`
 	media.PlaybackStatus
 }
 type TextResource struct {
@@ -114,7 +116,8 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 		s.snapshot.Target = nil
 		if previousRef != ref || s.sourceID == "" {
 			s.sourceID = secret(16)
-			s.sourceRevision = 0
+			// Progress is scoped by session + sourceRevision. Keep that proof
+			// monotonic so a delayed previous-file report cannot match this file.
 		}
 	} else {
 		target := *command.Target
@@ -184,6 +187,12 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 			cancel()
 		} else {
 			s.playback = playback
+			timeline := playback.Status().Timeline
+			seekEnd := timeline.Duration
+			if timeline.VideoEnd > 0 {
+				seekEnd = math.Min(seekEnd, timeline.VideoEnd)
+			}
+			s.snapshot.Target.Position = math.Min(s.snapshot.Target.Position, math.Max(0, seekEnd-.01))
 			s.readGrant = secret(32)
 			s.sourceRevision++
 			s.snapshot.State = "ready"
@@ -201,7 +210,7 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 				}
 				text = append(text, resource)
 			}
-			s.snapshot.Source = &Source{ID: s.sourceID, Revision: s.sourceRevision, Type: "hls", URL: base + "master.m3u8", Audio: probe.Audio, Text: text, PlaybackStatus: playback.Status()}
+			s.snapshot.Source = &Source{ID: s.sourceID, Revision: s.sourceRevision, Type: "hls", URL: base + "master.m3u8", Audio: probe.Audio, Text: text, TextWindow: 30, PlaybackStatus: playback.Status()}
 		}
 		m.mu.Unlock()
 	}()
@@ -236,7 +245,7 @@ func (m *Manager) ReadMedia(origin, grant string) (*media.Playback, error) {
 	return s.playback, nil
 }
 
-func (m *Manager) Progress(origin, token, id string, revision int, position float64) error {
+func (m *Manager) Progress(origin, token, id string, revision int, position float64, textDelay ...float64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c, err := m.auth(origin, token)
@@ -250,7 +259,7 @@ func (m *Manager) Progress(origin, token, id string, revision int, position floa
 	if s.snapshot.State != "ready" || s.playback == nil || s.sourceRevision != revision {
 		return denied(409, "REVISION_CONFLICT")
 	}
-	if err := s.playback.Confirm(position); err != nil {
+	if err := s.playback.Confirm(position, textDelay...); err != nil {
 		return denied(400, "INVALID_POSITION")
 	}
 	return nil

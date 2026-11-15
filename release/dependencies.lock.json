@@ -28,28 +28,32 @@
   ],
   "engine": {
     "commit": "3395046476632f68fb4cc85fd10d42cfede40ec0",
-    "reason": "Validated local admission with public IPv4 TCP peers and guarded, connected IPv4 UDP tracker sockets. Tracker exchanges are bounded to 15 seconds; DHT, uTP, PEX, local discovery, proxies and IPv6 remain disabled. Playback is a later stage.",
+    "reason": "Exact finite media ranges bound buffered reads and piece priorities; public IPv4 peer/tracker guards and all existing discovery restrictions remain.",
     "websiteAdmission": true,
     "tagObject": "8d1d2a2e9afb757dce8ecd719fc1389c4cd2250c",
-    "version": "MatriX.148-companion.4",
+    "version": "MatriX.148-companion.5",
     "upstreamVersion": "MatriX.148",
     "torrentModule": "github.com/tsynik/torrent@v1.2.34",
     "torrentModuleSum": "h1:ptxsr0IA7kaoDV1x/lrVLmz8s7xQ+nYgGJBHQvwM6Ck=",
     "patchRecipe": "cmd/patch-engine/main.go",
     "policy": "build/engine/guard.go",
     "patchHashes": {
+      "build/engine/testdata/range_reader_test.go": "50ee621787db897ca32bdd1f763a8c70725bb53ef7e4f76c92974e8d6e440180",
+      "build/engine/testdata/range_reader.go": "c7c4d0b6839b09e02cd11b131750a42a35a35049a46be239cf8b6dbd80822807",
+      "build/engine/testdata/range_test.go": "08c3aa410a954a9d8be82ca05af95f9b54735f90fd678e942c340614eb0ff641",
+      "build/engine/testdata/range.go": "2e110383bc33c18709452c7722885819c6b3435a37ad9df1f71db95e8c4355f8",
       "build/engine/guard.go": "e87d66397480ffee4eae73844b789d4ae3033a79fd79efe7f3714bdfcb4aea44",
       "build/engine/guard_test.go": "40ed7e11ee7433cec3737f3c2f92575ec62c4fad13cf74f91a47e40cc305caf4",
       "build/engine/testdata/socket_test.go": "1abff4d986e95bbca385ebd83c65831e2f7b61c2d94c13c419f668e9c86b47a3",
       "build/engine/testdata/tracker_test.go": "6bb6048d1724d5ed0b95948da53a07d60d01b5d70c5b62667667d819d178d2ab",
-      "cmd/patch-engine/main.go": "d0a5a4ccac243c2fa4fc86f5d1fe3c88d5cdb4d6f0a2ed37fb68500173ed058e",
+      "cmd/patch-engine/main.go": "da43c8783ffa37b9e423203ae38a2f74dfaae5c86a258d82a2f5f96dea3b1c61",
       "cmd/fetch-artifacts/main.go": "978bd375f67aa2206cb083068c8786f2d5195b979d8090c406153631fd51437e",
-      "scripts/engine.ps1": "c38b2225b1da51214c603c94fe1729b5c8f546d0fff3d9e8f2251b5eafe820d0",
-      "scripts/engine.sh": "ecb67a8c49668b79edb896c54dccc6048703747efe7def4b4d1dc3acd3419a47",
+      "scripts/engine.ps1": "08b965fea4f480ec1cf1748300ce6da50e23eda9596253eb89b2bd0bc2184495",
+      "scripts/engine.sh": "18f3220ed094c571c334f9359bb8d47686ae62938c35e4f4984850b06bc1a86b",
       "internal/locator/locator.go": "e581df035da66fab5eb9b3abc43170864a7a7fd3386dc1855393feefb9591262",
       "internal/locator/locator_test.go": "15f96023fb73cee04c1f1dbad9efc2c66face3bcd9365819ba95680e58061c38",
       "build/engine/testdata/metadata_test.go": "8c9b3c2f8e6ef089886253d2bcb5c3c1bb348686eee90ca0550a626f89fd052b",
-      "scripts/assemble.ps1": "094213236c5df5faced2005f32eea590090b43f870d4b60cf336584f5e7274fd"
+      "scripts/assemble.ps1": "a30604598083c373c6199bc0d090bacb8a25f4d1f56bdfc2efdf7d59a295e67a"
     }
   },
   "media": {
@@ -111,7 +115,7 @@
     "windows-amd64": [
       {
         "name": "torrserver.exe",
-        "sha256": "0d40987b45b1dd510b71b63a31428d33c5c57be1cd12486a77e1853254396c6a"
+        "sha256": "6a77f649858096366d2d5695e74e61862788f860d81687001d142a84c7e56887"
       },
       {
         "name": "ffmpeg.exe",
@@ -125,7 +129,7 @@
     "linux-amd64": [
       {
         "name": "torrserver",
-        "sha256": "d82b1fbe11b7a0dcc3cdd6ef45a5181ebb10d7109c8d21a5a6f16e5b01ace15f"
+        "sha256": "a0ea924df816a26ef78ff2262df20cf84d8022389c0540866d7b0030d05fd002"
       },
       {
         "name": "ffmpeg",

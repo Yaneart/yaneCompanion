@@ -101,6 +101,19 @@ func TestTrackResourceGrantBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	s = wait("ready")
+	if s.Source.TextWindow != 30 {
+		t.Fatal("missing applied-delay window contract")
+	}
+	progressPath := "/v1/sessions/" + s.ID + "/progress"
+	for _, tc := range []struct {
+		delay  string
+		status int
+	}{{"-60", 204}, {"0", 204}, {"60", 204}, {"60.1", 400}} {
+		body := fmt.Sprintf(`{"sourceRevision":%d,"positionSeconds":0,"textDelaySeconds":%s}`, s.Source.Revision, tc.delay)
+		if w := call(h, "POST", progressPath, website, c.Token, body); w.Code != tc.status {
+			t.Fatalf("delay=%s: %d %s", tc.delay, w.Code, w.Body.String())
+		}
+	}
 	if len(s.Source.Text) != 7 || len(s.Source.Text[1].Fonts) != 1 || len(s.Source.Text[3].Fonts) != 1 {
 		t.Fatal("missing real resources")
 	}
@@ -135,6 +148,18 @@ func TestTrackResourceGrantBoundary(t *testing.T) {
 				t.Fatal("resource auth bypass")
 			}
 		}
+	}
+	// Audio replacement rotates the grant, while approved caption bytes stay
+	// available for this same probe/file instead of starting another extraction.
+	previousURL := s.Source.Text[0].URL
+	target.AudioRef = s.Probe.Audio[1].Ref
+	_, err = h.Sessions.Command(website, c.Token, s.ID, key(40), []byte("audio replacement"), sessions.Command{Action: "configure", Revision: s.Revision, Target: &target, ClientMedia: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = wait("ready")
+	if s.Source.Text[0].URL == previousURL || read("GET", previousURL, website, "").Code != 404 || read("GET", s.Source.Text[0].URL, website, "").Code != 200 {
+		t.Fatal("caption cache crossed or lost its source grant")
 	}
 	old := s.Source.Text[0].URL
 	_, err = h.Sessions.Command(website, c.Token, s.ID, key(4), []byte("new probe"), sessions.Command{Action: "probe", Revision: s.Revision, FileRef: s.Selected})

@@ -120,8 +120,9 @@ func (h Handler) sessionAPI(w http.ResponseWriter, r *http.Request, origin strin
 	if len(parts) == 3 {
 		if parts[2] == "progress" {
 			var body struct {
-				Revision int      `json:"sourceRevision"`
-				Position *float64 `json:"positionSeconds"`
+				Revision  int      `json:"sourceRevision"`
+				Position  *float64 `json:"positionSeconds"`
+				TextDelay *float64 `json:"textDelaySeconds"`
 			}
 			if _, ok := readJSON(w, r, &body, 1024); !ok {
 				return
@@ -130,7 +131,11 @@ func (h Handler) sessionAPI(w http.ResponseWriter, r *http.Request, origin strin
 				fail(w, 400, "INVALID_POSITION")
 				return
 			}
-			if !failure(h.Sessions.Progress(origin, token, id, body.Revision, *body.Position)) {
+			var delay []float64
+			if body.TextDelay != nil {
+				delay = []float64{*body.TextDelay}
+			}
+			if !failure(h.Sessions.Progress(origin, token, id, body.Revision, *body.Position, delay...)) {
 				respond(w, 204, nil)
 			}
 			return

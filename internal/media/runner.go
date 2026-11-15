@@ -100,6 +100,10 @@ func (r *Runner) run(ctx context.Context, executable string, args []string, gate
 }
 
 func (r *Runner) runLimit(ctx context.Context, executable string, args []string, gate *jobs.Gate, limit int) ([]byte, error) {
+	return r.runInputLimit(ctx, executable, args, gate, limit, nil)
+}
+
+func (r *Runner) runInputLimit(ctx context.Context, executable string, args []string, gate *jobs.Gate, limit int, input []byte) ([]byte, error) {
 	var output []byte
 	err := gate.Run(ctx, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -107,6 +111,9 @@ func (r *Runner) runLimit(ctx context.Context, executable string, args []string,
 		stdout := &boundedOutput{overflow: make(chan struct{}, 1), limit: limit}
 		stderr := &boundedOutput{overflow: stdout.overflow, limit: 64 << 10}
 		cmd := exec.Command(executable, args...)
+		if input != nil {
+			cmd.Stdin = bytes.NewReader(input)
+		}
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		worker, err := lifecycle.Start(cmd)

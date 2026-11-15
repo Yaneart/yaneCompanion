@@ -38,5 +38,7 @@ foreach ($target in @('windows','linux')) {
 $env:GOOS = 'windows'
 & $Go -C (Join-Path $engineSource 'companion-torrent') test -mod=readonly . ./tracker ./companionguard -run 'TestCompanion|TestSpecialAddresses|TestTrackerSockets|TestLocalSocketsNeverConnect|TestHTTPRedirectCannotReachPrivateService' -count=1
 if ($LASTEXITCODE -ne 0) { throw 'Engine policy tests failed' }
+& $Go -C $engineSource test -mod=readonly ./torr ./torr/storage/torrstor -run '^TestCompanion(ExactRange|FiniteRangePriorities|RangeReadAndCancel)$' -count=1
+if ($LASTEXITCODE -ne 0) { throw 'Engine finite range tests failed' }
 Write-Output "Patched engine sources: $engineSource"
 Write-Output 'Engine binaries built. Verify hashes against release/dependencies.lock.json before assembly.'

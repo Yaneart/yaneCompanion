@@ -23,4 +23,5 @@ for target in windows linux; do
   GOOS=$target go -C "$source" build -trimpath -buildvcs=false -mod=readonly "-ldflags=-buildid= -s -w -X server/version.Version=$engine_version" -o "$PWD/.tools/engine/$target-amd64/torrserver$suffix" ./cmd
 done
 go -C "$source/companion-torrent" test -mod=readonly . ./tracker ./companionguard -run 'TestCompanion|TestSpecialAddresses|TestTrackerSockets|TestLocalSocketsNeverConnect|TestHTTPRedirectCannotReachPrivateService' -count=1
+go -C "$source" test -mod=readonly ./torr ./torr/storage/torrstor -run '^TestCompanion(ExactRange|FiniteRangePriorities|RangeReadAndCancel)$' -count=1
 printf 'Patched engine sources: %s\n' "$source"

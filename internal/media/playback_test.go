@@ -144,6 +144,43 @@ func TestRealContinuousPlayback(t *testing.T) {
 	}
 }
 
+func TestRealPlaybackFinalSeconds(t *testing.T) {
+	executable := os.Getenv("YANE_TEST_EXECUTABLE")
+	if executable == "" {
+		t.Skip("requires bundled media executables")
+	}
+	bundle, err := release.Verify(filepath.Dir(executable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "testdata/tiny-h264.mp4"
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Runner: New(bundle.FFmpeg, bundle.FFprobe), Backend: fileRanges{path}, Directory: t.TempDir()}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	file := engine.File{Index: 1, Path: "video.mp4", Length: info.Size()}
+	probe, err := service.Probe(ctx, "hash", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, remaining := range []float64{4, .2, 4, .2} {
+		position := probe.Duration - remaining
+		p, err := service.Prepare(ctx, "hash", file, probe, Target{Position: position, Output: "original"}, []ClientMedia{{probe.Video.ContentType, true}})
+		if err != nil {
+			t.Fatalf("remaining %.1fs: %v", remaining, err)
+		}
+		status := p.Status()
+		if status.Error != "" || len(status.Ranges) == 0 || status.Timeline.WindowEnd < position {
+			p.Close()
+			t.Fatalf("remaining %.1fs not readable: %+v", remaining, status)
+		}
+		p.Close()
+	}
+}
+
 func TestMP4RejectsMalformedLengthsAndMissingClocks(t *testing.T) {
 	for _, data := range [][]byte{{}, {0, 0, 0, 7, 'm', 'o', 'o', 'v'}, {0, 0, 0, 20, 'm', 'o', 'o', 'v'}, {0, 0, 0, 1, 'm', 'o', 'o', 'v'}} {
 		if _, err := initClock(data); err == nil {

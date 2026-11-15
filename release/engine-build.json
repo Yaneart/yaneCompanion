@@ -1,14 +1,14 @@
 {
-    "engineVersion":  "MatriX.148-companion.4",
+    "engineVersion":  "MatriX.148-companion.5",
     "toolchain":  "go1.27.3",
     "upstreamCommit":  "3395046476632f68fb4cc85fd10d42cfede40ec0",
     "torrentModule":  "github.com/tsynik/torrent@v1.2.34",
-    "inputLockSHA256":  "48257e777fb895364619e2ab43df2252f00cf3986060346616be04a5c1108b5c",
+    "inputLockSHA256":  "ad8fda5f1263c1e3e782fffc8a290b0f903fdef65e32db404f99045b4167a7e1",
     "freshSourceExtraction":  true,
     "verifiedModuleCache":  true,
     "repeatedBuildIdentical":  true,
     "platformSHA256":  {
-                           "windows-amd64":  "0d40987b45b1dd510b71b63a31428d33c5c57be1cd12486a77e1853254396c6a",
-                           "linux-amd64":  "d82b1fbe11b7a0dcc3cdd6ef45a5181ebb10d7109c8d21a5a6f16e5b01ace15f"
+                           "windows-amd64":  "6a77f649858096366d2d5695e74e61862788f860d81687001d142a84c7e56887",
+                           "linux-amd64":  "a0ea924df816a26ef78ff2262df20cf84d8022389c0540866d7b0030d05fd002"
                        }
 }

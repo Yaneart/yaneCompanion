@@ -1,4 +1,60 @@
-# Cleanup / user acceptance pending вЂ” 2026-11-15
+# Home/Public peer review — 2026-11-17
+
+Report: ../yaneMedia/docs/torrent-home-public-review-2026-11-17.md.
+Real peer-backed Home then Public tested with registry Player0.1.25 installed for
+final Public checks. Legacy muxed short video-only EOF tail stays in its last AV
+segment: byte-exact moof/mdat, known video EOF, <=8s, unchanged byte/cache budgets.
+Muxed TARGETDURATION=8 from first publication; separate/no-audio remains3. No
+padding, packet drops or timestamp rewriting. Focused real FFmpeg and prior
+tail/clock checks plus tester negatives PASS. Actual Chernobyl seek-to-end and
+auto-next PASS; final constant-target repeat47.0s (network-sensitive preparation).
+Caption fallback on that no-subtitle-cues release still hits128MiB/HTTP429; AV
+continues. This limit and unavailable swarms are not declared fixed.
+
+Windows/Linux hosts rebuilt twice identically; four development packages rebuilt
+and sizes/SHA256 verified. Normal Windows PID20580 not stopped; its mapped image
+retained in .tools/host-running-20580-20261117.exe, new dist host takes effect after
+user tray Exit/relaunch. Isolated controllers/engines/accounts/tokens cleaned.
+
+# Separate audio integration — release prepared, 2026-11-16
+
+Opt-in `target.audioMode=separate`, source-scoped manifests and session `audio`
+commands implemented in source. Continuous video retained; old audio stays active
+until replacement readiness, then joins with one bounded retired cache. Aggregate
+128MiB (video/resources112MiB + two audio slots8MiB each); independent measured
+clocks/selected duration/EOF, cancel/replay/Origin/grant/Stop focused PASS.
+Actual MediaVideoRenderer + controller/session/grant API + real FFmpeg: B-frame
+fixture,440→880Hz, same video/currentSrc/MSE/revision, playing/paused switch, seek,
+24/28s EOF and shorter-track correction PASS in Chromium149. Source-scoped PDT uses
+measured DTS; Player clears native ended via a confirmed seek when audio extends EOF.
+The same full UI scenario passed with Home. No real swarm/native platform acceptance.
+Focused producers cover cancellation before/mid-input, retry, retired-cache bounds,
+EOF/correction and cleanup. API covers receipt replay, Origin denial and Stop revocation.
+Legacy muxed playback/captions/output/security checks PASS. Updated unsigned
+Windows/Linux0.3.0-dev bundles/packages prepared; tool/engine lock unchanged.
+Owner published Player0.1.24; EXACT app install and Home delivery completed. Full
+real host UI scenarios repeated PASS with the npm package. Normal Companion still
+advertises no audio.renditions; user tray Exit/relaunch required for new Public path.
+No normal helper/profile/pairing was stopped or changed.
+[Canonical report](../../yaneMedia/docs/torrent-audio-integration-2026-11-16.md).
+
+---
+
+# Probe recovery — 2026-11-16
+
+Bounded probe retry is implemented for confirmed upstream range interruption and
+internal FFprobe deadline while the caller remains alive. Maximum two attempts
+share the original120s deadline and32MiB budget. Invalid media, resource limits
+and caller cancellation do not retry. No unsupported diagnosis of the original
+Severance failure: see [Media report](../../yaneMedia/docs/playback-bugs-2026-11-16.md).
+Independent tester PASS, including actual FFprobe30.1s internal timeout recovery,
+100ms caller cancellation and interrupted-range/shared-budget regressions.
+Final Windows/Linux0.3.0-dev hosts reproduce; packages are unsigned/unpublished.
+The user's ordinary running process was not stopped and needs a manual restart.
+
+---
+
+# History: Cleanup / user acceptance pending — 2026-11-15
 
 User requested removal of temporary work artifacts before making commits manually.
 His own playback verification is deferred to next time and has NOT been performed.

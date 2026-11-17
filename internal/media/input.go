@@ -32,15 +32,25 @@ func randomRef() string {
 // upstream ranges let a paused viewer release engine sockets without expiring
 // FFmpeg's input. No redirects, secondary inputs or filesystem protocols.
 type inputBridge struct {
-	url      string
-	server   *http.Server
-	bytes    atomic.Int64
-	exceeded atomic.Bool
+	url         string
+	server      *http.Server
+	bytes       atomic.Int64
+	exceeded    atomic.Bool
+	unavailable atomic.Bool
+}
+
+type inputBudget struct {
+	bytes atomic.Int64
+	limit int64
 }
 
 var inputOptions = []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", "mov,matroska,webm,avi,mpegts", "-max_streams", "64", "-max_pixels", "8847360", "-threads", "2", "-probesize", "8388608", "-analyzeduration", "8000000", "-max_alloc", "67108864"}
 
-func bridge(ctx context.Context, backend RangeBackend, hash string, file engine.File, limit int64) (*inputBridge, error) {
+func bridge(ctx context.Context, backend RangeBackend, hash string, file engine.File, limit int64, shared ...*inputBudget) (*inputBridge, error) {
+	budget := &inputBudget{limit: limit}
+	if len(shared) > 0 {
+		budget = shared[0]
+	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return nil, errors.New("MEDIA_UNAVAILABLE")
@@ -100,23 +110,27 @@ func bridge(ctx context.Context, backend RangeBackend, hash string, file engine.
 		defer stop()
 		for start <= end {
 			size := min(int64(256<<10), end-start+1)
-			if limit > 0 && b.bytes.Add(size) > limit {
+			if budget.limit > 0 && budget.bytes.Add(size) > budget.limit {
 				b.exceeded.Store(true)
 				return
 			}
 			readCtx, finish := context.WithTimeout(requestCtx, 120*time.Second)
 			body, err := backend.OpenRange(readCtx, hash, file, start, start+size-1)
 			if err != nil {
+				if requestCtx.Err() == nil {
+					b.unavailable.Store(true)
+				}
 				finish()
 				return
 			}
 			n, err := io.CopyN(w, body, size)
 			body.Close()
 			finish()
-			if limit == 0 {
-				b.bytes.Add(n)
-			}
+			b.bytes.Add(n)
 			if err != nil {
+				if requestCtx.Err() == nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
+					b.unavailable.Store(true)
+				}
 				return
 			}
 			start += n

@@ -73,9 +73,26 @@ type Playback struct {
 	readers            chan struct{}
 	openFiles          map[string]int
 	captions           *captions
+	renditions         *Renditions
+	// Nonzero only for single-track producers; their combined disk limit is
+	// still 128 MiB. Legacy muxed playback retains its existing limits.
+	byteLimit, byteTarget int64
+	trackHandler          string
+	audioLane             int
+	haltProducer          context.CancelFunc
+	producerStopped       bool
+	captionPosition       *float64
+	programOrigin         float64
 }
 
 func (s *Service) Prepare(ctx context.Context, hash string, file engine.File, probe *Probe, target Target, client []ClientMedia) (*Playback, error) {
+	if target.AudioMode == "separate" {
+		r, err := s.PrepareRenditions(ctx, hash, file, probe, target, client)
+		if err != nil {
+			return nil, err
+		}
+		return &Playback{renditions: r}, nil
+	}
 	startupDeadline := time.Now().Add(120 * time.Second)
 	audio, copyAudio, err := probe.Validate(target, client)
 	if err != nil {
@@ -225,15 +242,24 @@ func (p *Playback) run(runner *Runner, args []string) {
 	defer p.input.Close()
 	work, cancel := context.WithCancel(p.ctx)
 	defer cancel()
+	p.mu.Lock()
+	p.haltProducer = cancel
+	p.mu.Unlock()
 	result := make(chan error, 1)
-	go func() { result <- runner.generate(work, args, p.consume) }()
+	go func() {
+		if p.trackHandler == "soun" {
+			result <- runner.generateOn(work, args, p.consume, runner.audio[p.audioLane])
+		} else {
+			result <- runner.generate(work, args, p.consume)
+		}
+	}()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case err := <-result:
 			p.mu.Lock()
-			if err != nil && p.ctx.Err() == nil {
+			if err != nil && p.ctx.Err() == nil && !p.producerStopped {
 				p.failure = err
 				if p.status.Error == "" {
 					p.status.Error = "MEDIA_FAILED"
@@ -272,6 +298,19 @@ func (p *Playback) run(runner *Runner, args []string) {
 	}
 }
 
+// Retain bounded immutable fragments for reads already in flight while joining
+// a superseded audio producer. Closing the source still removes everything.
+func (p *Playback) stopProducer() {
+	p.mu.Lock()
+	p.producerStopped = true
+	halt := p.haltProducer
+	p.mu.Unlock()
+	if halt != nil {
+		halt()
+	}
+	<-p.done
+}
+
 func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 	var init []byte
 	var clock mp4Clock
@@ -282,6 +321,7 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 	var pending []byte
 	var pendingTime fragmentTime
 	audioTail := false
+	videoTail := false
 	publish := func(fragment []byte, timing fragmentTime) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -294,6 +334,13 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 		p.mu.Lock()
 		if sequence == 0 {
 			origin = timing.start
+			if p.trackHandler != "" {
+				// All rendition producers preserve the file clock and use the same
+				// positive offset. Do not independently rebase audio on each seek.
+				p.status.Timeline.AbsoluteAnchor = math.Max(0, timing.pts-1)
+				p.status.Timeline.WindowEnd = p.status.Timeline.AbsoluteAnchor
+				p.programOrigin = timing.start - 1
+			}
 			p.status.Timeline.MediaAnchor = timing.pts - timing.minDecode
 			if !finite(p.status.Timeline.MediaAnchor) || p.status.Timeline.MediaAnchor < 0 || p.status.Timeline.MediaAnchor > p.window {
 				p.mu.Unlock()
@@ -307,11 +354,19 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 			return errPlaylist
 		}
 		p.segments = append(p.segments, segment{Name: name, Duration: end - start, Start: start, End: end, Sequence: sequence})
-		if end-start > 3 {
+		// A short video-only EOF tail stays with its last AV fragment. HLS
+		// otherwise repeatedly reloads that fragment against the shorter audio
+		// buffered range and never appends ENDLIST. No samples/clocks are changed.
+		if end-start > 3 && (!videoTail || end-start > 8) {
 			p.mu.Unlock()
 			return errPlaylist
 		}
 		p.target = 3
+		if p.trackHandler == "" && p.status.Output.Audio != nil {
+			// Advertise the EOF exception from the first playlist: HLS requires
+			// TARGETDURATION to stay constant for this media playlist's lifetime.
+			p.target = 8
+		}
 		p.status.Bytes += int64(len(fragment))
 		p.status.Downloaded = p.input.bytes.Load()
 		p.status.Timeline.WindowEnd = end
@@ -350,6 +405,9 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 		data, kind, err := readBox(r)
 		if err == io.EOF {
 			if pending != nil {
+				if videoTail && math.Abs(p.status.Timeline.AbsoluteAnchor+pendingTime.end-origin-p.videoEnd) > .1 {
+					return ErrUnsupported
+				}
 				return publish(pending, pendingTime)
 			}
 			return nil
@@ -364,7 +422,14 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 			}
 			init = append(init, data...)
 			if kind == "moov" {
-				clock, err = initClock(init)
+				if p.trackHandler == "" {
+					clock, err = initClock(init)
+				} else {
+					clock, err = initTrackClock(init, p.trackHandler)
+					if err == nil && len(clock.timescales) != 1 {
+						err = errPlaylist
+					}
+				}
 				if err != nil {
 					return err
 				}
@@ -382,13 +447,24 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 			}
 			timing, err := clock.fragment(data)
 			onlyAudio := errors.Is(err, errAudioOnly)
+			videoOnly := p.trackHandler == "" && p.status.Output.Audio != nil && !onlyAudio && timing.audioEnd == 0
 			if audioTail && (!onlyAudio || p.audioEnd <= p.videoEnd+.1) {
 				return errPlaylist
 			}
 			if err != nil && !onlyAudio {
 				return err
 			}
-			if !onlyAudio && pending != nil {
+			if videoTail && !videoOnly {
+				return ErrUnsupported
+			}
+			if videoOnly {
+				end := p.status.Timeline.AbsoluteAnchor + timing.end - origin
+				if pending == nil || p.videoEnd <= 0 || end < p.videoEnd-8 || end > p.videoEnd+.1 || timing.end-pendingTime.start > 8 || math.Abs(timing.start-pendingTime.end) > .1 {
+					return ErrUnsupported
+				}
+				videoTail = true
+			}
+			if !onlyAudio && pending != nil && !videoOnly {
 				if err := publish(pending, pendingTime); err != nil {
 					return err
 				}
@@ -401,7 +477,15 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 			if err != nil || k != "mdat" || len(data)+len(mdat) > segmentLimit {
 				return errPlaylist
 			}
-			if onlyAudio {
+			if videoOnly {
+				if len(pending)+len(data)+len(mdat) > segmentLimit {
+					return errors.New("RESOURCE_LIMIT")
+				}
+				pending = append(pending, data...)
+				pending = append(pending, mdat...)
+				pendingTime.end = timing.end
+				pendingTime.allEnd = math.Max(pendingTime.allEnd, timing.allEnd)
+			} else if onlyAudio {
 				anchor := origin
 				if sequence == 0 {
 					anchor = pendingTime.start
@@ -444,7 +528,7 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 				pendingTime = timing
 			}
 			p.mu.Lock()
-			overBudget := p.status.Bytes+int64(len(pending)) > cacheLimit
+			overBudget := p.status.Bytes+int64(len(pending)) > p.cacheLimit()
 			p.mu.Unlock()
 			if overBudget {
 				return errors.New("RESOURCE_LIMIT")
@@ -458,7 +542,7 @@ func (p *Playback) consume(ctx context.Context, r io.Reader) error {
 
 func (p *Playback) evict() error {
 	cutoff := p.position - 8
-	if p.status.Bytes >= cacheTarget*3/4 {
+	if p.status.Bytes >= p.cacheTarget()*3/4 {
 		cutoff = p.position
 	}
 	// Requested seek is not confirmed playback. Preserve the initial keyframe
@@ -480,7 +564,7 @@ func (p *Playback) evict() error {
 		p.status.Bytes -= info.Size()
 		p.segments = p.segments[1:]
 	}
-	if p.status.Bytes > cacheLimit || len(p.segments) > 64 {
+	if p.status.Bytes > p.cacheLimit() || len(p.segments) > 64 {
 		return errPlaylist
 	}
 	if len(p.segments) > 0 {
@@ -489,7 +573,19 @@ func (p *Playback) evict() error {
 	return nil
 }
 func (p *Playback) blocked() bool {
-	return p.status.Bytes >= cacheTarget || len(p.segments) >= 32 || p.status.Timeline.WindowEnd-p.position >= p.window
+	return p.status.Bytes >= p.cacheTarget() || len(p.segments) >= 32 || p.status.Timeline.WindowEnd-p.position >= p.window
+}
+func (p *Playback) cacheLimit() int64 {
+	if p.byteLimit > 0 {
+		return p.byteLimit
+	}
+	return cacheLimit
+}
+func (p *Playback) cacheTarget() int64 {
+	if p.byteTarget > 0 {
+		return p.byteTarget
+	}
+	return cacheTarget
 }
 func (p *Playback) wait(ctx context.Context) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -519,6 +615,9 @@ func (p *Playback) wait(ctx context.Context) error {
 	}
 }
 func (p *Playback) Status() PlaybackStatus {
+	if p.renditions != nil {
+		return p.renditions.Status()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := p.status
@@ -526,6 +625,9 @@ func (p *Playback) Status() PlaybackStatus {
 	return s
 }
 func (p *Playback) Confirm(position float64, textDelay ...float64) error {
+	if p.renditions != nil {
+		return p.renditions.Confirm(position, textDelay...)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !finite(position) || len(p.segments) == 0 || position < p.segments[0].Start-.1 || position > p.status.Timeline.WindowEnd+.1 || position > p.status.Timeline.Duration+.1 {
@@ -549,6 +651,10 @@ func (p *Playback) Confirm(position float64, textDelay ...float64) error {
 	return p.evict()
 }
 func (p *Playback) Close() {
+	if p.renditions != nil {
+		p.renditions.Close()
+		return
+	}
 	p.closeOnce.Do(func() {
 		p.cancel()
 		p.input.Close()
@@ -567,6 +673,10 @@ func (p *Playback) Close() {
 
 // Serve exposes only generated resources. Paths never come from media metadata.
 func (p *Playback) Serve(w http.ResponseWriter, r *http.Request, name string) {
+	if p.renditions != nil {
+		p.renditions.Serve(w, r, name)
+		return
+	}
 	select {
 	case p.readers <- struct{}{}:
 		defer func() { <-p.readers }()

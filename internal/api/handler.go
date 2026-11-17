@@ -206,7 +206,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.Sessions != nil {
 			capabilities = append(capabilities, "torrent-admission.v1", "torrent-files.v1")
 			if h.Sessions.MediaEnabled() {
-				capabilities = append(capabilities, "sessions.v1", "hls.mse", "timeline.windowed-vod", "video.original", "audio.aac", "audio.select", "text.prepared", "text.ass", "text.sidecars", "text.fonts")
+				capabilities = append(capabilities, "sessions.v1", "hls.mse", "timeline.windowed-vod", "video.original", "audio.aac", "audio.select", "audio.renditions", "text.prepared", "text.ass", "text.sidecars", "text.fonts")
 			}
 		}
 		respond(w, 200, map[string]any{"product": "yaneCompanion", "helperVersion": release.Version, "api": map[string]int{"major": 1, "minor": 0}, "bootId": h.BootID, "capabilities": capabilities})

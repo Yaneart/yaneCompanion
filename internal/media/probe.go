@@ -70,11 +70,32 @@ type Service struct {
 func (s *Service) Probe(ctx context.Context, hash string, file engine.File) (*Probe, error) {
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	b, err := bridge(ctx, s.Backend, hash, file, 32<<20)
+	budget := &inputBudget{limit: 32 << 20}
+	for attempt := 0; ; attempt++ {
+		probe, err := s.probe(ctx, hash, file, budget)
+		if err == nil || (err.Error() != "NO_PEERS" && !errors.Is(err, context.DeadlineExceeded)) || attempt == 1 || ctx.Err() != nil {
+			return probe, err
+		}
+	}
+}
+
+func (s *Service) probe(ctx context.Context, hash string, file engine.File, budget *inputBudget) (_ *Probe, failure error) {
+	b, err := bridge(ctx, s.Backend, hash, file, 32<<20, budget)
 	if err != nil {
 		return nil, err
 	}
 	defer b.Close()
+	defer func() {
+		// A truncated torrent range can make ffprobe report invalid input.
+		// Preserve its cause without exposing the worker's private input URL.
+		if failure != nil && ctx.Err() == nil {
+			if b.exceeded.Load() {
+				failure = errors.New("RESOURCE_LIMIT")
+			} else if b.unavailable.Load() {
+				failure = errors.New("NO_PEERS")
+			}
+		}
+	}()
 	args := append([]string{"-v", "error"}, inputOptions...)
 	args = append(args, "-show_streams", "-show_format", "-of", "json", b.url)
 	data, err := s.Runner.Probe(ctx, args)
@@ -233,6 +254,9 @@ func parseProbe(data []byte) (*Probe, error) {
 	if !found {
 		return nil, ErrUnsupported
 	}
+	if p.supportsRenditions() {
+		p.Outputs = append(p.Outputs, "original-separate-audio")
+	}
 	return p, nil
 }
 
@@ -344,15 +368,16 @@ type ClientMedia struct {
 	Supported   bool   `json:"supported"`
 }
 type Target struct {
-	FileRef  string  `json:"fileRef"`
-	AudioRef string  `json:"audioRef"`
-	TextRef  *string `json:"textRef"`
-	Position float64 `json:"positionSeconds"`
-	Output   string  `json:"output"`
+	FileRef   string  `json:"fileRef"`
+	AudioRef  string  `json:"audioRef"`
+	TextRef   *string `json:"textRef"`
+	Position  float64 `json:"positionSeconds"`
+	Output    string  `json:"output"`
+	AudioMode string  `json:"audioMode,omitempty"`
 }
 
 func (p *Probe) Validate(target Target, client []ClientMedia) (*Audio, bool, error) {
-	if target.Output != "original" || !finite(target.Position) || target.Position < 0 || target.Position >= p.Duration || len(client) > 16 {
+	if target.Output != "original" || target.AudioMode != "" && target.AudioMode != "separate" || !finite(target.Position) || target.Position < 0 || target.Position >= p.Duration || len(client) > 16 {
 		return nil, false, ErrUnsupported
 	}
 	if target.TextRef != nil {

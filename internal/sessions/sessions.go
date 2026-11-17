@@ -87,6 +87,7 @@ type session struct {
 	pending             string
 	selectCancel        context.CancelFunc
 	selecting           bool
+	audioSelecting      bool
 	selectDone          chan struct{}
 }
 type Manager struct {
@@ -533,6 +534,14 @@ func (m *Manager) Cancel(origin, token, key string, revision int) error {
 		return denied(409, "REVISION_CONFLICT")
 	}
 	s.snapshot.Revision++
+	if s.audioSelecting {
+		if s.selectCancel != nil {
+			s.selectCancel()
+		}
+		s.pending = ""
+		r.operation.State = "cancelled"
+		return nil
+	}
 	if m.media != nil && (s.snapshot.State == "probing" || s.snapshot.State == "preparing") {
 		if s.selectCancel != nil {
 			s.selectCancel()

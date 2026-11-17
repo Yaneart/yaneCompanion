@@ -54,7 +54,7 @@ func (p *Playback) restoreCaptionCache() {
 	for _, r := range shared.resources {
 		size += len(r.data)
 	}
-	if size > resourceLimit || p.status.Bytes+int64(size) > cacheLimit {
+	if size > resourceLimit || p.status.Bytes+int64(size) > p.cacheLimit() {
 		return
 	}
 	c.cache = maps.Clone(shared.resources)
@@ -121,6 +121,9 @@ func (p *Playback) serveResource(w http.ResponseWriter, r *http.Request, name st
 	defer stopWrite()
 	p.mu.Lock()
 	position := p.position
+	if p.captionPosition != nil {
+		position = *p.captionPosition
+	}
 	cached, exists := p.captions.cache[name]
 	delay := p.captions.delay
 	p.mu.Unlock()
@@ -153,7 +156,7 @@ func (p *Playback) serveResource(w http.ResponseWriter, r *http.Request, name st
 			return
 		}
 		old := len(cached.data)
-		if p.captions.bytes-old+len(data) > resourceLimit || p.status.Bytes-int64(old)+int64(len(data)) > cacheLimit {
+		if p.captions.bytes-old+len(data) > resourceLimit || p.status.Bytes-int64(old)+int64(len(data)) > p.cacheLimit() {
 			p.mu.Unlock()
 			http.Error(w, "RESOURCE_LIMIT", 429)
 			return
@@ -311,7 +314,7 @@ func (p *Playback) indexedText(ctx context.Context, t Text, start, end float64, 
 		}
 		if index != nil {
 			size := index.memory()
-			if c.bytes+size > resourceLimit || p.status.Bytes+int64(size) > cacheLimit {
+			if c.bytes+size > resourceLimit || p.status.Bytes+int64(size) > p.cacheLimit() {
 				p.mu.Unlock()
 				return nil, false, errors.New("RESOURCE_LIMIT")
 			}

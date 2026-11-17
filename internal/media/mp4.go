@@ -81,6 +81,12 @@ type mp4Clock struct {
 }
 
 func initClock(data []byte) (mp4Clock, error) {
+	return initTrackClock(data, "vide")
+}
+
+// A rendition has exactly one primary clock. Audio-only output must be measured
+// from its own sample tables, never assigned the video clock or requested seek.
+func initTrackClock(data []byte, handler string) (mp4Clock, error) {
 	c := mp4Clock{timescales: map[uint32]uint32{}, defaults: map[uint32]uint32{}}
 	moov, err := child(data, "moov")
 	if err != nil {
@@ -144,7 +150,10 @@ func initClock(data []byte) (mp4Clock, error) {
 		if e != nil || len(hdlr) < 12 {
 			return c, errPlaylist
 		}
-		if string(hdlr[8:12]) == "vide" {
+		if string(hdlr[8:12]) == handler {
+			if c.video != 0 {
+				return c, errPlaylist
+			}
 			c.video = id
 		}
 	}
@@ -154,7 +163,7 @@ func initClock(data []byte) (mp4Clock, error) {
 	return c, nil
 }
 
-type fragmentTime struct{ start, end, pts, minDecode, minPTS, allEnd float64 }
+type fragmentTime struct{ start, end, pts, minDecode, minPTS, allEnd, audioEnd float64 }
 
 var errAudioOnly = errors.New("AUDIO_ONLY_FRAGMENT")
 
@@ -288,6 +297,8 @@ func (c mp4Clock) fragment(data []byte) (fragmentTime, error) {
 		if id == c.video {
 			found = true
 			result.start, result.end, result.pts = track.start, track.end, track.pts
+		} else {
+			result.audioEnd = math.Max(result.audioEnd, track.allEnd)
 		}
 	}
 	if !found {

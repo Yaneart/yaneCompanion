@@ -14,13 +14,15 @@ import (
 )
 
 type Source struct {
-	ID         string         `json:"id"`
-	Revision   int            `json:"revision"`
-	Type       string         `json:"type"`
-	URL        string         `json:"url"`
-	Audio      []media.Audio  `json:"audioTracks"`
-	Text       []TextResource `json:"textTracks"`
-	TextWindow int            `json:"textWindowSeconds"`
+	ID             string                `json:"id"`
+	Revision       int                   `json:"revision"`
+	Type           string                `json:"type"`
+	URL            string                `json:"url"`
+	Audio          []media.Audio         `json:"audioTracks"`
+	Text           []TextResource        `json:"textTracks"`
+	TextWindow     int                   `json:"textWindowSeconds"`
+	AudioMode      string                `json:"audioMode,omitempty"`
+	AudioRendition *media.AudioRendition `json:"audioRendition,omitempty"`
 	media.PlaybackStatus
 }
 type TextResource struct {
@@ -66,6 +68,8 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 	ref := command.FileRef
 	state := "probing"
 	switch command.Action {
+	case "audio":
+		return m.selectAudio(s, c, r, key, command)
 	case "probe":
 		if command.Target != nil || command.ClientMedia != nil {
 			return Admission{}, denied(400, "INVALID_INPUT")
@@ -210,7 +214,7 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 				}
 				text = append(text, resource)
 			}
-			s.snapshot.Source = &Source{ID: s.sourceID, Revision: s.sourceRevision, Type: "hls", URL: base + "master.m3u8", Audio: probe.Audio, Text: text, TextWindow: 30, PlaybackStatus: playback.Status()}
+			s.snapshot.Source = &Source{ID: s.sourceID, Revision: s.sourceRevision, Type: "hls", URL: base + "master.m3u8", Audio: probe.Audio, Text: text, TextWindow: 30, AudioMode: command.Target.AudioMode, AudioRendition: playback.AudioRendition(), PlaybackStatus: playback.Status()}
 		}
 		m.mu.Unlock()
 	}()
@@ -224,6 +228,7 @@ func (m *Manager) updatePlayback(s *session) {
 	status := s.playback.Status()
 	source := *s.snapshot.Source
 	source.PlaybackStatus = status
+	source.AudioRendition = s.playback.AudioRendition()
 	s.snapshot.Source = &source
 	if status.Error != "" {
 		s.snapshot.State = "failed"

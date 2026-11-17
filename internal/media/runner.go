@@ -15,11 +15,12 @@ import (
 
 type Runner struct {
 	metadata, preparation, resources *jobs.Gate
+	audio                            [2]*jobs.Gate
 	ffmpeg, ffprobe                  string
 }
 
 func New(ffmpeg, ffprobe string) *Runner {
-	return &Runner{metadata: jobs.New(), preparation: jobs.New(), resources: jobs.New(), ffmpeg: ffmpeg, ffprobe: ffprobe}
+	return &Runner{metadata: jobs.New(), preparation: jobs.New(), audio: [2]*jobs.Gate{jobs.New(), jobs.New()}, resources: jobs.New(), ffmpeg: ffmpeg, ffprobe: ffprobe}
 }
 
 func (r *Runner) Probe(ctx context.Context, args []string) ([]byte, error) {
@@ -32,7 +33,11 @@ func (r *Runner) Prepare(ctx context.Context, args []string) ([]byte, error) {
 // Continuous preparation owns its lane until EOF or cancellation. Output files,
 // startup/stall deadlines and backpressure are bounded by Playback's monitor.
 func (r *Runner) generate(ctx context.Context, args []string, consume func(context.Context, io.Reader) error) error {
-	return r.preparation.Run(ctx, func(ctx context.Context) error {
+	return r.generateOn(ctx, args, consume, r.preparation)
+}
+
+func (r *Runner) generateOn(ctx context.Context, args []string, consume func(context.Context, io.Reader) error, gate *jobs.Gate) error {
+	return gate.Run(ctx, func(ctx context.Context) error {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		output := &boundedOutput{overflow: make(chan struct{}, 1), limit: 64 << 10}

@@ -77,6 +77,11 @@ func (c *Cache) Create(name string) (string, error) {
 func (c *Cache) Check() error {
 	var total int64
 	err := fs.WalkDir(c.root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
+		// Playback can evict a fragment or retire a source after enumeration.
+		// Missing children have released their budget; the root must remain valid.
+		if path != "." && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -87,6 +92,9 @@ func (c *Cache) Check() error {
 			return nil
 		}
 		info, err := entry.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}

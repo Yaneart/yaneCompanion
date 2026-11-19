@@ -39,11 +39,13 @@ func (m *Manager) selectAudio(s *session, c *controller, r *record, key string, 
 		}
 		s.pending = ""
 		if err != nil {
-			r.operation.State, r.operation.Error = "failed", "MEDIA_FAILED"
+			r.operation.State, r.operation.Error = "failed", mediaFailure(err)
+			m.lastError = r.operation.Error
 			cancel()
 			return
 		}
 		r.operation.State = "ready"
+		m.lastError = ""
 		if value.Position != nil {
 			wanted.Position = *value.Position
 		}

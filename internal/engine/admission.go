@@ -13,6 +13,7 @@ import (
 )
 
 var ErrUnavailable = errors.New("ENGINE_UNAVAILABLE")
+var ErrNoPeers = errors.New("NO_PEERS")
 
 type File struct {
 	Index  int    `json:"id"`
@@ -89,6 +90,11 @@ func (e *Engine) admit(ctx context.Context, input locator.Input) error {
 
 func (e *Engine) Files(ctx context.Context, hash string) ([]File, error) {
 	data, status, err := e.post(ctx, map[string]string{"action": "get", "hash": hash})
+	// The engine can expire a cold magnet before the host's 120 s deadline.
+	// Missing torrent metadata is distinct from a failed private engine request.
+	if err == nil && status == http.StatusNotFound {
+		return nil, ErrNoPeers
+	}
 	if err != nil || status != 200 {
 		return nil, ErrUnavailable
 	}

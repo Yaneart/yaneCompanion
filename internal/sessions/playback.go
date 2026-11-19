@@ -55,6 +55,9 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 	if r.admission.SessionID != "" {
 		return r.admission, nil
 	}
+	if m.storageFull {
+		return Admission{}, denied(507, "CACHE_FULL")
+	}
 	s := c.sessions[id]
 	if s == nil {
 		return Admission{}, denied(404, "NOT_FOUND")
@@ -164,14 +167,8 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 		}
 		s.pending = ""
 		if err != nil {
-			code := "MEDIA_FAILED"
-			if errors.Is(err, media.ErrUnsupported) {
-				code = "UNSUPPORTED_MEDIA"
-			} else if err.Error() == "NO_PEERS" {
-				code = "NO_PEERS"
-			} else if err.Error() == "RESOURCE_LIMIT" {
-				code = "RESOURCE_LIMIT"
-			}
+			code := mediaFailure(err)
+			m.lastError = code
 			r.operation.State = "failed"
 			r.operation.Error = code
 			s.snapshot.Error = code
@@ -185,6 +182,7 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 			return
 		}
 		r.operation.State = "ready"
+		m.lastError = ""
 		if command.Action == "probe" {
 			s.snapshot.Probe = probe
 			s.snapshot.State = "awaiting_target"
@@ -221,6 +219,24 @@ func (m *Manager) Command(origin, token, id, key string, body []byte, command Co
 	return r.admission, nil
 }
 
+func mediaFailure(err error) string {
+	if errors.Is(err, media.ErrUnsupported) {
+		return "UNSUPPORTED_MEDIA"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "PREPARATION_TIMEOUT"
+	}
+	if err != nil {
+		switch err.Error() {
+		case "NO_PEERS", "RESOURCE_LIMIT", "CACHE_FULL", "UNSUPPORTED_MEDIA":
+			return err.Error()
+		case "OUTPUT_LIMIT":
+			return "RESOURCE_LIMIT"
+		}
+	}
+	return "MEDIA_FAILED"
+}
+
 func (m *Manager) updatePlayback(s *session) {
 	if s.playback == nil || s.snapshot.State != "ready" || s.snapshot.Source == nil {
 		return
@@ -231,11 +247,7 @@ func (m *Manager) updatePlayback(s *session) {
 	source.AudioRendition = s.playback.AudioRendition()
 	s.snapshot.Source = &source
 	if status.Error != "" {
-		s.snapshot.State = "failed"
-		s.snapshot.Error = status.Error
-		s.readGrant = ""
-		s.snapshot.Source = nil
-		s.cancel()
+		m.fail(s, status.Error)
 	}
 }
 

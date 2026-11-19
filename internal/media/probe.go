@@ -76,6 +76,13 @@ func (s *Service) Probe(ctx context.Context, hash string, file engine.File) (*Pr
 		if err == nil || (err.Error() != "NO_PEERS" && !errors.Is(err, context.DeadlineExceeded)) || attempt == 1 || ctx.Err() != nil {
 			return probe, err
 		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 

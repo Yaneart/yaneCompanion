@@ -170,9 +170,11 @@ func Run(ctx context.Context, options Options) (result error) {
 			return errors.New("HTTP_UNAVAILABLE")
 		case <-monitor.C:
 			admissions.Tick()
-			if err := sessions.Check(); err != nil {
+			err := sessions.Check()
+			if err != nil && err.Error() != "CACHE_FULL" {
 				return err
 			}
+			admissions.SetStorageAvailable(err == nil)
 		}
 	}
 }

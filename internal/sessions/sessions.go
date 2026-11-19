@@ -69,6 +69,7 @@ type record struct {
 }
 type controller struct {
 	id, origin, grant string
+	failure           string
 	expires           time.Time
 	operations        map[string]*record
 	sessions          map[string]*session
@@ -99,6 +100,8 @@ type Manager struct {
 	fatal       chan error
 	media       *media.Service
 	closing     bool
+	storageFull bool
+	lastError   string
 }
 type Controller struct {
 	ID        string    `json:"controllerId"`
@@ -132,10 +135,40 @@ func (m *Manager) Activity() string {
 func (m *Manager) DiagnosticError() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active == nil {
-		return ""
+	if m.active == nil || m.active.snapshot.Error == "" {
+		return m.lastError
 	}
 	return m.active.snapshot.Error
+}
+
+// Disk pressure stops media work without taking down pairing or diagnostics.
+// Clearing pressure permits a new explicit admission; it never restarts work.
+func (m *Manager) SetStorageAvailable(available bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.storageFull = !available
+	if !available {
+		m.lastError = "CACHE_FULL"
+		if s := m.active; s != nil && s.snapshot.State != "stopping" && s.snapshot.State != "stopped" {
+			m.fail(s, "CACHE_FULL")
+		}
+	}
+}
+
+func (m *Manager) fail(s *session, code string) {
+	s.snapshot.State, s.snapshot.Error = "failed", code
+	s.snapshot.Source, s.readGrant = nil, ""
+	m.lastError = code
+	s.owner.failure = code
+	if s.pending != "" {
+		r := s.owner.operations[s.pending]
+		r.operation.State, r.operation.Error = "failed", code
+		s.pending = ""
+	}
+	s.cancel()
+	if s.selectCancel != nil {
+		s.selectCancel()
+	}
 }
 
 // Quiesce atomically excludes a raced admission before a user-requested removal.
@@ -185,6 +218,10 @@ func (m *Manager) Heartbeat(origin, token string) (time.Time, error) {
 		m.mu.Unlock()
 		return time.Time{}, err
 	}
+	if c.failure != "" {
+		m.mu.Unlock()
+		return time.Time{}, denied(503, c.failure)
+	}
 	c.expires = m.now().Add(180 * time.Second)
 	expires := c.expires
 	s := m.active
@@ -195,12 +232,16 @@ func (m *Manager) Heartbeat(origin, token string) (time.Time, error) {
 		_, err := m.backend.Files(ctx, s.hash)
 		cancel()
 		if err != nil {
+			code := "ENGINE_UNAVAILABLE"
+			if errors.Is(err, engine.ErrNoPeers) {
+				code = "NO_PEERS"
+			}
 			m.mu.Lock()
 			if m.active == s {
-				m.stop(s)
+				m.fail(s, code)
 			}
 			m.mu.Unlock()
-			return time.Time{}, denied(503, "ENGINE_UNAVAILABLE")
+			return time.Time{}, denied(503, code)
 		}
 	}
 	return expires, nil
@@ -330,6 +371,9 @@ func (m *Manager) Create(origin, token, key string, body []byte, l locator.Locat
 	if r.admission.SessionID != "" {
 		return r.admission, nil
 	}
+	if m.storageFull {
+		return Admission{}, denied(507, "CACHE_FULL")
+	}
 	input, err := locator.Validate(l)
 	if err != nil {
 		return Admission{}, denied(400, "UNSAFE_LOCATOR")
@@ -343,6 +387,8 @@ func (m *Manager) Create(origin, token, key string, body []byte, l locator.Locat
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &session{ctx: ctx, snapshot: Snapshot{ID: secret(16), Revision: 1, State: "metadata", Files: []File{}}, owner: c, hash: input.Hash(), files: map[string]engine.File{}, cancel: cancel, done: make(chan struct{}), pending: key}
 	m.active = s
+	m.lastError = ""
+	c.failure = ""
 	c.sessions[s.snapshot.ID] = s
 	r.admission = Admission{key, s.snapshot.ID, 1, "metadata"}
 	r.operation = Operation{Admission: r.admission, State: "pending"}
@@ -354,7 +400,10 @@ func (m *Manager) Create(origin, token, key string, body []byte, l locator.Locat
 func (m *Manager) load(ctx context.Context, s *session, input locator.Input) {
 	defer close(s.done)
 	work, cancel := context.WithTimeout(ctx, 120*time.Second)
-	err := m.backend.Admit(work, input)
+	err := work.Err()
+	if err == nil {
+		err = m.backend.Admit(work, input)
+	}
 	files := []engine.File{}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -370,7 +419,7 @@ func (m *Manager) load(ctx context.Context, s *session, input locator.Input) {
 		}
 	}
 	failureCode := "ENGINE_UNAVAILABLE"
-	if errors.Is(work.Err(), context.DeadlineExceeded) {
+	if errors.Is(work.Err(), context.DeadlineExceeded) || errors.Is(err, engine.ErrNoPeers) {
 		failureCode = "NO_PEERS"
 	}
 	if errors.Is(err, locator.ErrUnsafe) {
@@ -380,11 +429,7 @@ func (m *Manager) load(ctx context.Context, s *session, input locator.Input) {
 	m.mu.Lock()
 	if ctx.Err() == nil {
 		if err != nil {
-			s.snapshot.State = "failed"
-			s.snapshot.Error = failureCode
-			s.owner.operations[s.pending].operation.State = "failed"
-			s.owner.operations[s.pending].operation.Error = failureCode
-			s.cancel()
+			m.fail(s, failureCode)
 		} else {
 			for _, file := range files {
 				ref := secret(16)

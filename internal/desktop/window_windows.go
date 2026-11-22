@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -88,96 +89,151 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			defer win("DestroyIcon", icon)
 		}
 	}
+
+	const (
+		connections = iota
+		settings
+		updates
+		diagnosticView
+	)
+	theme := newWindowTheme()
+	defer theme.close()
 	var window uintptr
+	var fade pageFade
 	controls := map[uintptr]uintptr{}
+	page := connections
+	pages := [4][]uintptr{}
 	var snapshot Snapshot
-	lastRequest, lastGrants, lastStatus := "", "", ""
-	var setView func(bool)
-	var currentRequestID string
-	setText := func(handle uintptr, value string) { win("SetWindowTextW", handle, wide(value)) }
+	requestID, grantsKey := "", "\x00"
+	var refresh func()
+	setText := func(id uintptr, value string) { win("SetWindowTextW", controls[id], wide(value)) }
+	visible := func(id uintptr, show bool) {
+		handle := controls[id]
+		if (win("GetWindowLongW", handle, -16)&0x10000000 != 0) == show {
+			return
+		}
+		flags := 0x009f // hide, no redraw, no move/resize/activation/Z-order
+		if show {
+			flags = 0x005f // show with the same positioning flags
+		}
+		win("SetWindowPos", handle, 0, 0, 0, 0, 0, flags)
+	}
+	setView := func(next int) {
+		if page != next {
+			setText(220, "")
+		}
+		page = next
+		visible(220, next != diagnosticView)
+		setup := snapshot.Ready && snapshot.ActiveSite() == ""
+		if next == updates {
+			folderX, folderY, diagnosticsX, diagnosticsY := 283, 307, 46, 350
+			if !snapshot.UpdatesAvailable {
+				folderX, folderY, diagnosticsX, diagnosticsY = 46, 264, 283, 264
+			}
+			win("SetWindowPos", controls[304], 0, folderX, folderY, 0, 0, 0x1d)
+			win("SetWindowPos", controls[305], 0, diagnosticsX, diagnosticsY, 0, 0, 0x1d)
+		}
+		for index, ids := range pages {
+			for _, id := range ids {
+				show := index == next
+				switch id {
+				case 105, 106, 210, 211, 212, 213, 214:
+					show = show && requestID != ""
+				case 202, 204:
+					show = show && requestID == ""
+				case 217, 218:
+					show = show && requestID == "" && snapshot.ActiveSite() != ""
+				case 134:
+					show = show && requestID == "" && setup
+				case 301, 302, 303:
+					show = show && snapshot.UpdatesAvailable
+				}
+				visible(id, show)
+			}
+		}
+		win("RedrawWindow", window, 0, 0, 0xa1) // invalidate the completed page and its children without erasing first
+	}
+	navigate := func(next int) {
+		if next != page {
+			fade.start()
+			setView(next)
+		}
+	}
 	showWindow := func() { win("ShowWindow", window, 9); win("SetForegroundWindow", window) }
 	report := func(err error) {
 		if err != nil {
-			win("MessageBoxW", window, wide(err.Error()), wide("yaneCompanion"), 0x10)
+			setText(220, err.Error())
+		} else {
+			setText(220, "")
 		}
 	}
-	tray := notifyIcon{Window: 0, ID: 1, Flags: 1 | 2 | 4, Callback: 0x8001, Icon: icon}
+	readText := func(id uintptr) string {
+		var value [513]uint16
+		win("GetWindowTextW", controls[id], &value[0], len(value))
+		return windows.UTF16ToString(value[:])
+	}
+	tray := notifyIcon{ID: 1, Flags: 1 | 2 | 4, Callback: 0x8001, Icon: icon}
 	tray.Size = uint32(unsafe.Sizeof(tray))
-	copy(tray.Tip[:], windows.StringToUTF16("yaneCompanion — локальный помощник"))
+	copy(tray.Tip[:], windows.StringToUTF16(windowTitle))
 	trayAvailable := false
 	addTray := func() {
 		tray.Window = window
 		result, _, _ := shell32.NewProc("Shell_NotifyIconW").Call(0, uintptr(unsafe.Pointer(&tray)))
 		trayAvailable = result != 0
 	}
-	hideWindow := func() {
-		if trayAvailable {
-			win("ShowWindow", window, 0)
-		} else {
-			win("ShowWindow", window, 2)
-		}
-	}
 	taskbarCreated := uint32(win("RegisterWindowMessageW", wide("TaskbarCreated")))
-	refresh := func() {
-		snapshot = actions.Snapshot()
-		setText(controls[207], snapshot.Update)
-		status := snapshot.Status + "\r\n" + snapshot.Activity
-		if status != lastStatus {
-			setText(controls[201], status)
-			lastStatus = status
-		}
-		requestText := "Нет запросов на подключение. Нажмите «Подключить» на сайте."
-		if len(snapshot.Requests) > 0 {
-			r := snapshot.Requests[0]
-			requestText = r.Origin + "\r\nКод: " + r.Code + "   (до " + r.ExpiresAt.Local().Format("15:04:05") + ")\r\nСверьте адрес и код с сайтом."
-			if currentRequestID != r.RequestID {
-				if setView != nil {
-					setView(false)
-				}
-				showWindow()
-				currentRequestID = r.RequestID
-			}
-		}
-		if requestText != lastRequest {
-			setText(controls[202], requestText)
-			lastRequest = requestText
-		}
-		enabled := uintptr(0)
-		if len(snapshot.Requests) > 0 {
-			enabled = 1
-		}
-		win("EnableWindow", controls[105], enabled)
-		win("EnableWindow", controls[106], enabled)
-		grantsKey := ""
-		for _, g := range snapshot.Grants {
-			grantsKey += g.ID
-		}
-		if grantsKey != lastGrants {
-			win("SendMessageW", controls[107], 0x184, 0, 0)
-			for _, g := range snapshot.Grants {
-				win("SendMessageW", controls[107], 0x180, 0, wide(g.Origin+" — "+g.CreatedAt.Local().Format("02.01 15:04")))
-			}
-			lastGrants = grantsKey
-		}
-		checked := uintptr(0)
-		if snapshot.Autostart {
-			checked = 1
-		}
-		win("SendMessageW", controls[104], 0xf1, checked, 0)
-	}
 	procedure := syscall.NewCallback(func(hwnd uintptr, id uint32, w, l uintptr) uintptr {
 		if id == taskbarCreated {
 			addTray()
+			if !trayAvailable && win("IsWindowVisible", hwnd) == 0 {
+				showWindow()
+			}
 			return 0
 		}
 		switch id {
-		case 0x10:
-			hideWindow()
-			return 0 // closing hides; Exit stops
+		case 0x14: // WM_ERASEBKGND; WM_PAINT presents a complete back buffer
+			return 1
+		case 0x0f: // WM_PAINT
+			theme.paint(hwnd, page)
+			return 0
+		case 0x2b: // WM_DRAWITEM
+			var item drawItem
+			windows.NewLazySystemDLL("kernel32.dll").NewProc("RtlMoveMemory").Call(uintptr(unsafe.Pointer(&item)), l, unsafe.Sizeof(item))
+			selected := item.id == 135 && page == connections || item.id == 130 && page == settings || item.id == 132 && (page == updates || page == diagnosticView)
+			theme.button(&item, selected)
+			return 1
+		case 0x133, 0x134, 0x138: // edit, list box and static control colors
+			element := win("GetDlgCtrlID", l)
+			color, fill, brush := ink, surface, theme.surfaceBrush
+			switch element {
+			case 101, 107, 219:
+				fill, brush = elevated, theme.fieldBrush
+			case 202, 207, 211, 214, 217:
+				color = muted
+			case 218:
+				color = accent
+			case 209, 220:
+				color, fill, brush = muted, background, theme.backgroundBrush
+			}
+			gdi.NewProc("SetTextColor").Call(w, color)
+			gdi.NewProc("SetBkColor").Call(w, fill)
+			return brush
+		case 0x10: // WM_CLOSE
+			fade.stop()
+			if trayAvailable {
+				win("ShowWindow", hwnd, 0)
+			} else {
+				win("DestroyWindow", hwnd)
+			}
+			return 0
 		case 0x2:
 			win("PostQuitMessage", 0)
 			return 0
 		case 0x113:
+			if w == pageFadeTimer {
+				fade.tick()
+				return 0
+			}
 			select {
 			case <-ctx.Done():
 				win("DestroyWindow", hwnd)
@@ -197,141 +253,255 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 				showWindow()
 			case 0x205:
 				menu := win("CreatePopupMenu")
-				defer win("DestroyMenu", menu)
-				win("AppendMenuW", menu, 2, 0, wide(snapshot.Status+" · "+snapshot.Activity))
-				win("AppendMenuW", menu, 0x800, 0, 0)
-				for _, item := range []struct {
-					id    uintptr
-					title string
-				}{{120, "Открыть управление"}, {103, "Открыть сайт"}, {110, "Выход — остановить просмотр"}} {
-					win("AppendMenuW", menu, 0, item.id, wide(item.title))
+				if menu == 0 {
+					return 0
 				}
+				defer win("DestroyMenu", menu)
+				win("AppendMenuW", menu, 0, 120, wide("Открыть yaneCompanion"))
+				win("AppendMenuW", menu, 0, 110, wide("Выйти"))
 				var p point
 				win("GetCursorPos", uintptr(unsafe.Pointer(&p)))
 				win("SetForegroundWindow", hwnd)
 				choice := win("TrackPopupMenu", menu, 0x100|2, uintptr(p.X), uintptr(p.Y), 0, hwnd, 0)
+				win("PostMessageW", hwnd, 0, 0, 0)
 				if choice != 0 {
 					win("SendMessageW", hwnd, 0x111, choice, 0)
 				}
 			}
 			return 0
 		case 0x111:
-			switch w & 0xffff {
-			case 130:
-				setView(true)
-			case 131:
-				setView(false)
+			command := w & 0xffff
+			switch command {
+			case 130, 134:
+				navigate(settings)
+				win("SetFocus", controls[101])
+			case 135:
+				navigate(connections)
+			case 132:
+				navigate(updates)
+			case 133:
+				navigate(updates)
+				win("SetFocus", controls[305])
 			case 301:
 				report(actions.CheckUpdate())
 			case 302, 303:
-				err := actions.DownloadUpdate(w&0xffff == 303)
-				if err != nil {
+				if err := actions.DownloadUpdate(command == 303); err != nil {
 					report(errors.New(diagnostics.Message(err)))
 				}
 			case 304:
-				report(actions.UpdateFolder())
-			case 305:
-				win("MessageBoxW", window, wide(actions.Diagnostics()+"\nCtrl+C — скопировать отчёт."), wide("Диагностика yaneCompanion"), 0x40)
-			case 308:
-				if win("MessageBoxW", window, wide("Очистить выбранные данные и выйти? После этого удалите программу через настройки ОС или пакетный менеджер. Без флажков данные сохраняются."), wide("Подготовка к удалению"), 0x124) == 6 {
-					err := actions.PrepareRemoval(win("SendMessageW", controls[306], 0xf0, 0, 0) != 0, win("SendMessageW", controls[307], 0xf0, 0, 0) != 0)
-					if err != nil {
-						report(errors.New(diagnostics.Message(err)))
-					}
+				if err := actions.UpdateFolder(); err != nil {
+					report(err)
+				} else {
+					setText(220, "Папка пакетов открыта.")
 				}
+			case 305:
+				reportText := strings.TrimRight(actions.Diagnostics(), "\r\n")
+				setText(219, strings.ReplaceAll(reportText, "\n", "\r\n"))
+				setText(306, "Скопировать отчёт")
+				navigate(diagnosticView)
+				scroll := 0
+				if win("SendMessageW", controls[219], 0xba, 0, 0) > 8 {
+					scroll = 1
+				}
+				win("ShowScrollBar", controls[219], 1, scroll)
+				win("SetFocus", controls[306])
+			case 306:
+				before := win("GetClipboardSequenceNumber")
+				win("SendMessageW", controls[219], 0xb1, 0, -1)
+				win("SendMessageW", controls[219], 0x301, 0, 0)
+				win("SendMessageW", controls[219], 0xb1, 0, 0)
+				if win("GetClipboardSequenceNumber") == before {
+					setText(306, "Повторить копирование")
+				} else {
+					setText(306, "Отчёт скопирован")
+				}
+				win("InvalidateRect", controls[306], 0, 0)
 			case 102:
-				value := make([]uint16, 1024)
-				win("GetWindowTextW", controls[101], uintptr(unsafe.Pointer(&value[0])), uintptr(len(value)))
-				report(actions.SetSite(windows.UTF16ToString(value)))
-			case 103:
-				report(actions.OpenSite())
+				site := readText(101)
+				if err := actions.SetSite(site); err != nil {
+					report(err)
+				} else {
+					setText(220, "Адрес сайта сохранён.")
+				}
 			case 104:
-				report(actions.Autostart(win("SendMessageW", controls[104], 0xf0, 0, 0) != 0))
+				report(actions.Autostart(!snapshot.Autostart))
 			case 105, 106:
 				if len(snapshot.Requests) > 0 {
-					report(actions.Decide(snapshot.Requests[0], w&0xffff == 105))
+					report(actions.Decide(snapshot.Requests[0], command == 105))
 				}
+			case 107:
+				win("EnableWindow", controls[108], int(int32(win("SendMessageW", controls[107], 0x188, 0, 0))+1))
+				return 0
 			case 108:
 				index := int32(win("SendMessageW", controls[107], 0x188, 0, 0))
 				if index >= 0 && int(index) < len(snapshot.Grants) {
 					report(actions.Revoke(snapshot.Grants[index].ID))
 				}
-			case 109:
-				hideWindow()
 			case 110:
 				win("DestroyWindow", hwnd)
+				return 0
 			case 120:
 				showWindow()
+				return 0
+			default:
+				return 0
 			}
+			refresh()
 			return 0
 		}
 		return win("DefWindowProcW", hwnd, uintptr(id), w, l)
 	})
-	class := windowClass{Procedure: procedure, Instance: uintptr(instance), Icon: icon, SmallIcon: icon, Cursor: win("LoadCursorW", 0, 32512), Background: 16, Name: windows.StringToUTF16Ptr("yaneCompanionDesktop")}
+	class := windowClass{Procedure: procedure, Instance: uintptr(instance), Icon: icon, SmallIcon: icon, Cursor: win("LoadCursorW", 0, 32512), Background: theme.backgroundBrush, Name: wide("yaneCompanionDesktop")}
 	class.Size = uint32(unsafe.Sizeof(class))
 	if win("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
 		return errors.New("DESKTOP_UNAVAILABLE")
 	}
 	defer win("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
-	window = win("CreateWindowExW", 0, uintptr(unsafe.Pointer(class.Name)), wide("yaneCompanion"), 0x00ca0000, 0x80000000, 0x80000000, 660, 650, 0, 0, uintptr(instance), 0)
+	const style = 0x02ca0000 // caption, system menu, minimize and clipped child painting
+	bounds := rect{right: 560, bottom: 470}
+	win("AdjustWindowRectEx", uintptr(unsafe.Pointer(&bounds)), style, 0, 0)
+	window = win("CreateWindowExW", 0, uintptr(unsafe.Pointer(class.Name)), wide(windowTitle), style, 0x80000000, 0x80000000, int(bounds.right-bounds.left), int(bounds.bottom-bounds.top), 0, 0, uintptr(instance), 0)
 	if window == 0 {
 		return errors.New("DESKTOP_UNAVAILABLE")
 	}
-	gdi := windows.NewLazySystemDLL("gdi32.dll")
-	fontName := wide("Segoe UI")
-	font, _, _ := gdi.NewProc("CreateFontW").Call(^uintptr(14), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 0, 0, uintptr(unsafe.Pointer(fontName)))
-	runtime.KeepAlive(fontName)
-	defer gdi.NewProc("DeleteObject").Call(font)
-	add := func(kind, text string, id uintptr, x, y, width, height int, style uintptr) {
-		handle := win("CreateWindowExW", 0, wide(kind), wide(text), 0x50000000|style, uintptr(x), uintptr(y), uintptr(width), uintptr(height), window, id, uintptr(instance), 0)
+	dark := int32(1)
+	dwm := windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmSetWindowAttribute")
+	if result, _, _ := dwm.Call(window, 20, uintptr(unsafe.Pointer(&dark)), 4); result != 0 {
+		dwm.Call(window, 19, uintptr(unsafe.Pointer(&dark)), 4)
+	}
+	add := func(view int, kind, text string, id uintptr, x, y, width, height int, style, font uintptr) {
+		if view < 0 {
+			style |= 0x10000000
+		}
+		handle := win("CreateWindowExW", 0, wide(kind), wide(text), 0x40000000|style, x, y, width, height, window, id, uintptr(instance), 0)
 		controls[id] = handle
 		win("SendMessageW", handle, 0x30, font, 1)
-	}
-	add("STATIC", "", 201, 20, 16, 605, 48, 0)
-	add("STATIC", "Адрес сайта (HTTPS, без пути)", 203, 20, 75, 605, 22, 0)
-	add("EDIT", actions.Snapshot().Site, 101, 20, 101, 455, 27, 0x00810080)
-	win("SendMessageW", controls[101], 0xc5, 512, 0)
-	add("BUTTON", "Сохранить", 102, 487, 100, 130, 29, 0x10000)
-	add("BUTTON", "Открыть сайт", 103, 20, 142, 165, 32, 0x10000)
-	add("BUTTON", "Запускать при входе в систему", 104, 205, 142, 410, 32, 0x10003)
-	add("STATIC", "Подтверждение подключения", 204, 20, 195, 600, 24, 0)
-	add("EDIT", "", 202, 20, 225, 600, 76, 0x00200844)
-	add("BUTTON", "Разрешить", 105, 20, 309, 140, 32, 0x10000)
-	add("BUTTON", "Отклонить", 106, 175, 309, 140, 32, 0x10000)
-	add("STATIC", "Разрешённые подключения (выберите для отзыва)", 205, 20, 366, 605, 24, 0)
-	add("LISTBOX", "", 107, 20, 396, 600, 102, 0x00a10001)
-	add("BUTTON", "Отозвать доступ", 108, 20, 508, 190, 32, 0x10000)
-	add("BUTTON", "Скрыть в трей", 109, 20, 560, 190, 32, 0x10000)
-	add("BUTTON", "Выход", 110, 480, 560, 140, 32, 0x10000)
-	add("BUTTON", "Обслуживание", 130, 225, 560, 235, 32, 0x10000)
-	add("STATIC", "yaneCompanion "+release.Version+" · API 1.0", 206, 20, 16, 600, 38, 0)
-	add("STATIC", "", 207, 20, 65, 600, 86, 0)
-	for i, text := range []string{"Проверить обновления", "Скачать полный пакет", "Скачать предыдущую версию", "Открыть папку пакетов", "Диагностика"} {
-		add("BUTTON", text, uintptr(301+i), 20, 160+i*43, 600, 32, 0x10000)
-	}
-	add("STATIC", "Перед удалением: выберите данные для очистки. Без флажков сохраняются все данные.", 208, 20, 385, 600, 42, 0)
-	add("BUTTON", "Удалить кэш просмотра и пакеты обновления", 306, 20, 431, 600, 30, 0x10003)
-	add("BUTTON", "Удалить сохранённые подключения сайтов", 307, 20, 465, 600, 30, 0x10003)
-	add("BUTTON", "Подготовить удаление и выйти", 308, 20, 508, 600, 32, 0x10000)
-	add("BUTTON", "Назад", 131, 225, 560, 235, 32, 0x10000)
-	setView = func(maintenance bool) {
-		for id, handle := range controls {
-			if id == 109 || id == 110 {
-				continue
-			}
-			isMaintenance := id >= 206 && id <= 208 || id >= 301 && id <= 308 || id == 131
-			visible := isMaintenance == maintenance
-			command := 0
-			if visible {
-				command = 5
-			}
-			win("ShowWindow", handle, command)
+		if view >= 0 {
+			pages[view] = append(pages[view], id)
 		}
 	}
-	setView(false)
-	refresh()
+	button := func(view int, text string, id uintptr, x, y, width int) {
+		add(view, "BUTTON", text, id, x, y, width, 34, 0x1000b, theme.body)
+	}
+	label := func(view int, text string, id uintptr, x, y, width, height int, font uintptr) {
+		add(view, "STATIC", text, id, x, y, width, height, 0, font)
+	}
+	button(-1, "Подключение", 135, 24, 96, 162)
+	button(-1, "Настройки", 130, 197, 96, 162)
+	button(-1, "Поддержка", 132, 370, 96, 166)
+	label(connections, "", 204, 46, 190, 468, 38, theme.title)
+	label(connections, "", 202, 46, 236, 444, 50, theme.body)
+	label(connections, "Адрес сайта", 217, 46, 301, 468, 22, theme.caption)
+	label(connections, "", 218, 46, 327, 468, 57, theme.body)
+	button(connections, "Указать адрес сайта", 134, 46, 309, 192)
+	label(connections, "Разрешить подключение?", 210, 46, 169, 468, 33, theme.title)
+	label(connections, "Сверьте адрес и код с сайтом.", 211, 46, 207, 468, 26, theme.body)
+	add(connections, "EDIT", "", 212, 46, 241, 466, 40, 0x00210844, theme.body)
+	label(connections, "", 213, 46, 291, 216, 38, theme.title)
+	label(connections, "", 214, 240, 297, 270, 30, theme.body)
+	button(connections, "Разрешить", 105, 367, 354, 145)
+	button(connections, "Отклонить", 106, 214, 354, 142)
+
+	label(settings, "Настройки", 205, 46, 166, 468, 29, theme.heading)
+	label(settings, "Адрес yaneMedia", 215, 46, 200, 468, 21, theme.body)
+	add(settings, "EDIT", actions.Snapshot().Site, 101, 56, 229, 321, 24, 0x10080, theme.body)
+	win("SendMessageW", controls[101], 0xc5, 512, 0)
+	win("SendMessageW", controls[101], 0x1501, 0, wide("https://media.example"))
+	button(settings, "Сохранить", 102, 401, 223, 111)
+	label(settings, "Запускать при входе", 216, 46, 276, 314, 26, theme.body)
+	button(settings, "", 104, 401, 267, 111)
+	label(settings, "Разрешённые подключения", 206, 46, 310, 468, 24, theme.body)
+	add(settings, "LISTBOX", "", 107, 56, 342, 313, 46, 0x210101, theme.body)
+	button(settings, "Отозвать", 108, 401, 343, 111)
+
+	label(updates, "Обновления", 208, 46, 169, 468, 32, theme.heading)
+	label(updates, "", 207, 46, 207, 468, 53, theme.body)
+	button(updates, "Проверить обновления", 301, 46, 264, 225)
+	button(updates, "Скачать обновление", 302, 283, 264, 229)
+	button(updates, "Скачать предыдущую версию", 303, 46, 307, 225)
+	button(updates, "Открыть папку пакетов", 304, 283, 307, 229)
+	button(updates, "Диагностика", 305, 46, 350, 225)
+	label(diagnosticView, "Диагностика", 221, 46, 169, 468, 32, theme.heading)
+	label(diagnosticView, "Технический отчёт о работе помощника.", 2110, 46, 205, 468, 22, theme.caption)
+	add(diagnosticView, "EDIT", "", 219, 56, 239, 445, 145, 0x00210844, theme.body)
+	button(diagnosticView, "Назад", 133, 24, 421, 96)
+	button(diagnosticView, "Скопировать отчёт", 306, 130, 421, 179)
+	add(-1, "STATIC", release.Version, 209, 426, 428, 110, 20, 2, theme.caption)
+	label(-1, "", 220, 24, 428, 385, 35, theme.caption)
+	fade = newPageFade(window, uintptr(instance))
+
+	lastText := map[uintptr]string{}
+	refresh = func() {
+		before := snapshot
+		snapshot = actions.Snapshot()
+		title, body := snapshot.connectionText()
+		pending, origin, code, expires := "", "", "", ""
+		if len(snapshot.Requests) != 0 {
+			r := snapshot.Requests[0]
+			pending, origin, code = r.RequestID, r.Origin, r.Code
+			expires = "Действует до " + r.ExpiresAt.Local().Format("15:04:05")
+		}
+		newRequest := pending != "" && pending != requestID
+		if pending != requestID {
+			fade.stop()
+			requestID = pending
+			if newRequest {
+				setView(connections)
+			} else if page == connections {
+				setView(connections)
+			}
+		}
+		if before.Ready != snapshot.Ready || before.ActiveSite() != snapshot.ActiveSite() || before.UpdatesAvailable != snapshot.UpdatesAvailable {
+			setView(page)
+		}
+		autostart := "Выключено"
+		if snapshot.Autostart {
+			autostart = "Включено"
+		}
+		for id, value := range map[uintptr]string{
+			204: title, 202: body, 104: autostart, 207: snapshot.Update,
+			212: origin, 213: code, 214: expires, 218: snapshot.ActiveSite(),
+		} {
+			if lastText[id] != value {
+				setText(id, value)
+				lastText[id] = value
+				if id == 104 {
+					win("InvalidateRect", controls[id], 0, 1)
+				}
+				if id == 212 {
+					showBar := 0
+					if win("SendMessageW", controls[id], 0xba, 0, 0) > 2 {
+						showBar = 1
+					}
+					win("ShowScrollBar", controls[id], 1, showBar)
+				}
+			}
+		}
+		key := ""
+		for _, g := range snapshot.Grants {
+			key += g.ID
+		}
+		if key != grantsKey {
+			win("SendMessageW", controls[107], 0x184, 0, 0)
+			if len(snapshot.Grants) == 0 {
+				win("SendMessageW", controls[107], 0x180, 0, wide("Нет подключений"))
+			}
+			for _, g := range snapshot.Grants {
+				win("SendMessageW", controls[107], 0x180, 0, wide(g.Origin+" — "+g.CreatedAt.Local().Format("02.01 15:04")))
+			}
+			grantsKey = key
+			win("EnableWindow", controls[107], len(snapshot.Grants))
+		}
+		index := int32(win("SendMessageW", controls[107], 0x188, 0, 0))
+		win("EnableWindow", controls[108], int(index+1))
+		if newRequest {
+			showWindow()
+		}
+	}
+	setView(connections)
 	addTray()
 	defer shell32.NewProc("Shell_NotifyIconW").Call(2, uintptr(unsafe.Pointer(&tray)))
+	refresh()
 	win("SetTimer", window, 1, 500, 0)
 	if !hidden || !trayAvailable {
 		win("ShowWindow", window, 5)

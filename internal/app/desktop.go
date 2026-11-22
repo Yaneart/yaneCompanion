@@ -42,8 +42,11 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 	var startupError error
 	var runtimeError error
 	var runtimeReady bool
-	var removal *Removal
 	status := "Запускаем yaneCompanion…"
+	launchOrigin := options.DevelopmentOrigin
+	if launchOrigin == "" && len(options.Origins) == 1 {
+		launchOrigin = options.Origins[0]
+	}
 	options.OriginAllowed = settings.Allowed
 	options.Show = func() {
 		select {
@@ -61,7 +64,7 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 		Snapshot: func() desktop.Snapshot {
 			mu.Lock()
 			defer mu.Unlock()
-			s := desktop.Snapshot{Status: status, Site: settings.Site(), Autostart: desktop.AutostartEnabled()}
+			s := desktop.Snapshot{Status: status, Site: settings.Site(), LaunchOrigin: launchOrigin, Autostart: desktop.AutostartEnabled(), Ready: store != nil, UpdatesAvailable: maintenance.configured()}
 			if store != nil {
 				s.Requests, s.Grants = store.Snapshot()
 			}
@@ -113,13 +116,6 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 			}
 			return store.Revoke(id)
 		},
-		OpenSite: func() error {
-			site := settings.Site()
-			if site == "" {
-				return errors.New("Сначала сохраните адрес сайта")
-			}
-			return openManagement(site)
-		},
 		CheckUpdate: func() error { return maintenance.check(ctx) },
 		DownloadUpdate: func(previous bool) error {
 			mu.Lock()
@@ -140,24 +136,6 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 			}
 			_, updateCode := maintenance.snapshot()
 			return diagnostics.Report(startupError, runtimeError, activity, playbackError, updateCode)
-		},
-		PrepareRemoval: func(clearCache, clearPairings bool) error {
-			mu.Lock()
-			defer mu.Unlock()
-			if manager != nil && manager.Activity() != "" {
-				return errors.New("UPDATE_PLAYBACK_ACTIVE")
-			}
-			if err := desktop.SetAutostart(false); err != nil {
-				return err
-			}
-			if manager != nil {
-				if err := manager.Quiesce(); err != nil {
-					return err
-				}
-			}
-			removal = &Removal{Cache: clearCache, Pairings: clearPairings}
-			cancel()
-			return nil
 		},
 	}
 	done := make(chan error, 1)
@@ -194,9 +172,6 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 	}
 	if errors.Is(runErr, lifecycle.ErrRunning) {
 		return nil
-	}
-	if removal != nil {
-		return cleanStopped(options.Paths, *removal)
 	}
 	// Runtime errors have already been shown in the persistent desktop status.
 	return nil

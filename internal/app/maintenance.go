@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,8 +28,15 @@ func newMaintenance(paths config.Paths) *maintenance {
 	if runtime.GOOS == "linux" {
 		platform = linuxPackagePlatform()
 	}
-	return &maintenance{client: update.New(platform, release.Version, paths.State, paths.Cache), message: "Обновления проверяются только по вашему запросу.", code: "OK"}
+	m := &maintenance{client: update.New(platform, release.Version, paths.State, paths.Cache), message: "Проверьте, доступна ли новая версия.", code: "OK"}
+	if !m.configured() {
+		m.code = "UPDATE_NOT_CONFIGURED"
+		m.message = diagnostics.Message(errors.New(m.code))
+	}
+	return m
 }
+
+func (m *maintenance) configured() bool { return m.client.Feed != "" && m.client.Key != "" }
 
 func linuxPackagePlatform() string {
 	data, err := os.ReadFile("/etc/os-release")
@@ -125,9 +131,8 @@ func (m *maintenance) folder() error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return errors.New("UPDATE_STORAGE_UNAVAILABLE")
 	}
-	path := filepath.ToSlash(dir)
-	if runtime.GOOS == "windows" {
-		path = "/" + path
+	if err := openFolder(dir); err != nil {
+		return errors.New("Не удалось открыть папку пакетов.")
 	}
-	return openManagement((&url.URL{Scheme: "file", Path: path}).String())
+	return nil
 }

@@ -37,7 +37,7 @@ New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 & $Go -C $projectRoot build -trimpath -buildvcs=false -mod=readonly "-ldflags=$linkFlags" -o (Join-Path $outputRoot ('yanecompanion' + $suffix)) ./cmd/yanecompanion
 if ($LASTEXITCODE -ne 0) { throw 'Host build failed' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'release\dependencies.lock.json') -Destination $outputRoot -Force
-foreach ($asset in @('yanecompanion.ico','yanecompanion.png','yanecompanion.desktop')) {
+foreach ($asset in @('yanecompanion.ico','yanecompanion.png','yanecompanion.desktop','Manrope.ttf','Manrope-OFL.txt')) {
   Copy-Item -LiteralPath (Join-Path $projectRoot ('packaging\' + $asset)) -Destination $outputRoot -Force
 }
 Write-Output "Built $Target"

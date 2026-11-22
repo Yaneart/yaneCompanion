@@ -212,13 +212,12 @@ func TestLC007Browser(t *testing.T) {
 			uiDone <- desktop.Run(uiCtx, desktop.Actions{
 				Snapshot: func() desktop.Snapshot {
 					r, g := h.Pairings.Snapshot()
-					return desktop.Snapshot{Status: "Тестовый стенд: API и FFmpeg", Site: h.DevelopmentOrigin, Activity: desktop.Activity(h.Sessions.Activity()), Requests: r, Grants: g}
+					return desktop.Snapshot{Status: "Тестовый стенд: API и FFmpeg", Site: h.DevelopmentOrigin, Ready: true, Activity: desktop.Activity(h.Sessions.Activity()), Requests: r, Grants: g}
 				},
 				SetSite:   func(string) error { return fmt.Errorf("Адрес стенда фиксирован") },
 				Autostart: func(bool) error { return fmt.Errorf("Автозапуск в стенде отключён") },
 				Decide:    func(r pairing.Request, approve bool) error { return h.Pairings.Decide(r.RequestID, r.Code, approve) },
 				Revoke:    h.Pairings.Revoke,
-				OpenSite:  func() error { return nil },
 			}, make(chan struct{}), false)
 		}()
 		defer func() {

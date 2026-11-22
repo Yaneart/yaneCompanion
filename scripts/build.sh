@@ -19,3 +19,4 @@ export GOOS=${target%-*}
 go build -trimpath -buildvcs=false -mod=readonly "-ldflags=$flags" -o "dist/$target/yanecompanion$suffix" ./cmd/yanecompanion
 cp release/dependencies.lock.json "dist/$target/"
 cp packaging/yanecompanion.ico packaging/yanecompanion.png packaging/yanecompanion.desktop "dist/$target/"
+cp packaging/Manrope.ttf packaging/Manrope-OFL.txt "dist/$target/"

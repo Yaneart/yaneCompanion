@@ -8,7 +8,7 @@
   #define AppVersion "0.3.0"
 #endif
 #ifndef MinimumWindowsVersion
-  #define MinimumWindowsVersion "10.0.22000"
+  #define MinimumWindowsVersion "10.0.19041"
 #endif
 
 [Setup]
@@ -32,7 +32,14 @@ SolidCompression=yes
 CloseApplications=no
 RestartApplications=no
 AppMutex=Local\yaneCompanion.Runtime
-WizardStyle=modern
+WizardStyle=modern dark windows11 includetitlebar hidebevels
+WizardBackColor=#101112
+WizardImageFile=wizard-panel.png
+WizardImageBackColor=#111720
+WizardSmallImageFile=wizard-mark.png
+WizardSmallImageBackColor=#101112
+WizardSizePercent=110,110
+DisableWelcomePage=no
 DisableProgramGroupPage=yes
 #ifdef SignedRelease
 SignTool=owner
@@ -43,7 +50,26 @@ SignedUninstaller=yes
 Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
 
+[Messages]
+en.WelcomeLabel1=Install [name]
+en.WelcomeLabel2=The wizard will install [name] on this computer.
+en.SelectDirBrowseLabel=Click Browse to choose another folder.
+en.ReadyLabel1=The wizard is ready to install [name].
+en.InstallingLabel=Installing [name] files.
+en.FinishedHeadingLabel=[name] is installed
+ru.WelcomeLabel1=Установка [name]
+ru.WelcomeLabel2=Мастер установит [name] на этот компьютер.
+ru.SelectDirBrowseLabel=Чтобы выбрать другую папку, нажмите «Обзор».
+ru.ReadyLabel1=Мастер готов установить [name].
+ru.InstallingLabel=Копируем файлы [name].
+ru.FinishedHeadingLabel=[name] установлен
+
+[CustomMessages]
+en.LaunchCompanion=Launch yaneCompanion
+ru.LaunchCompanion=Запустить yaneCompanion
+
 [Files]
+Source: "{#BundleDir}\Manrope.ttf"; DestName: "wizard-manrope.ttf"; Flags: dontcopy
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "*.exe~"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -57,11 +83,40 @@ Root: HKCU; Subkey: "Software\Classes\yanecompanion\DefaultIcon"; ValueType: str
 Root: HKCU; Subkey: "Software\Classes\yanecompanion\shell\open\command"; ValueType: string; ValueData: """{app}\yanecompanion.exe"" ""%1"""
 
 [Run]
-Filename: "{app}\yanecompanion.exe"; Description: "Запустить yaneCompanion"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\yanecompanion.exe"; Description: "{cm:LaunchCompanion}"; Flags: postinstall nowait skipifsilent
 
 [Code]
+const
+  FR_PRIVATE = $10;
+
 var
   ClearCache, ClearPairings: Boolean;
+  WizardFontPath: String;
+
+function AddFontResourceEx(FileName: String; Flags, Reserved: LongWord): Integer;
+  external 'AddFontResourceExW@gdi32.dll stdcall setuponly';
+function RemoveFontResourceEx(FileName: String; Flags, Reserved: LongWord): Boolean;
+  external 'RemoveFontResourceExW@gdi32.dll stdcall setuponly';
+
+procedure InitializeWizard();
+begin
+  ExtractTemporaryFile('wizard-manrope.ttf');
+  WizardFontPath := ExpandConstant('{tmp}\wizard-manrope.ttf');
+  if AddFontResourceEx(WizardFontPath, FR_PRIVATE, 0) = 0 then begin
+    WizardFontPath := '';
+    Exit;
+  end;
+  WizardForm.Font.Name := 'Manrope';
+  WizardForm.WelcomeLabel1.Font.Name := 'Manrope';
+  WizardForm.PageNameLabel.Font.Name := 'Manrope';
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Manrope';
+end;
+
+procedure DeinitializeSetup();
+begin
+  if WizardFontPath <> '' then
+    RemoveFontResourceEx(WizardFontPath, FR_PRIVATE, 0);
+end;
 
 function InitializeUninstall(): Boolean;
 begin

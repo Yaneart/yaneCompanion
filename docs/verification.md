@@ -15,7 +15,7 @@ native/release-приёмка не заменяется прошедшими fix
 | Раздельное HLS-аудио  | Home/Public MediaVideoRenderer, FFT 440 → 880 Гц, неизменное video/MSE, play/pause, seek, EOF и shorter-track correction               | Registry Player 0.1.24; затем итоговый Public 0.1.25                                                       |
 | Muxed EOF tail        | Настоящий FFmpeg, побайтные moof/mdat, continuity/known EOF, <=8 с, прежние byte/cache budgets                                         | TARGETDURATION=8 с первого publish; separate/no-audio=3. Отрицательные сценарии и tester повторно пройдены |
 | Probe recovery        | Не более двух попыток в общем бюджете 120 с/32 МиБ, подтверждённый range interruption/internal deadline                                | Invalid input, caller cancellation и resource limits не повторяются                                        |
-| Desktop/packages      | Windows 10 fixture с override min version; Debian/Ubuntu/Arch package install, GTK/Xvfb, consent/restart/revoke/Exit                   | Итоговый installer требует Windows 11; Win10/Xvfb не являются Win11/native Linux PASS                      |
+| Desktop/packages      | Обычный `.exe` на Windows 10 Home x64 (19045); Debian/Ubuntu/Arch package install, GTK/Xvfb, consent/restart/revoke/Exit в контейнерах   | Windows 11 и нативная установка пакетов Linux не проверены                                                |
 | Update/cleanup        | Подписанный ephemeral test manifest, integrity, current/previous rollback, active-session refusal, redacted diagnostics, owned cleanup | Не production feed/signature; symlink-варианты реально проверены на Linux, Windows privilege SKIP          |
 
 В cleanup исправлены совпадающие state/cache roots и traversal через updates symlink:
@@ -27,6 +27,17 @@ checkpoint/unknown files сохраняются, чужой/symlink path отк�
 альтернативы находятся в [итоговом отчёте](../../yaneMedia/docs/torrent-home-public-review-2026-11-17.md).
 Public Chernobyl EOF/auto-next подтверждён после tail fix. Единичные времена запуска
 не являются выровненным benchmark или гарантией доступности swarm.
+
+## LC-014 — установщик Windows 10 (2026-11-22)
+
+Минимум обычного `.exe` — Windows 10 2004 x64 (19041). На Windows 10 Home x64
+(19045) установщик, собранный без override, завершился с кодом 0. Проверены
+установленный бинарник, регистрация `yanecompanion://`, команда `version` и
+удаление тестовой установки.
+
+Пользователь сообщил об успешном запуске из клона на Arch. Debian 12 и
+Ubuntu 24.04.5 прошли проверку установки `.deb`, запуска, перезапуска и удаления
+в Docker. Остальные проверки LC-014 пропущены по решению пользователя.
 
 ## LC-013 — устойчивость и замеры (2026-11-19)
 
@@ -108,9 +119,8 @@ harness. Test пишет временный stand.json с test-only credential, 
 - Холодные metadata/probe/seek зависят от сети, pieces/peers и кеша. Быстрый старт
   на каждой раздаче, 4K/HDR и 30 минут непрерывного просмотра не подтверждены.
 - LC-013 реализован и проверен на development host; формальная приёмка не отмечена.
-- LC-014: реальные Windows 11, Debian/Ubuntu/Arch desktop, HTTPS/LNA/fullscreen,
-  clean install, permissions, sleep/crash и длительный playback. Arch проверяется
-  первым после остальных работ; недоступные ОС остаются непроверенными.
+- Windows 11, нативные пакеты Debian/Ubuntu/Arch, HTTPS/LNA/fullscreen, sleep/crash
+  и длительное воспроизведение остаются непроверенными в LC-014.
 - Нужны реальные владелец/ключи/hosting для Authenticode, timestamp, Ed25519 update
   feed и AUR. Development packages unsigned, внешняя публикация не выполнена.
   Corresponding-source/licenses входят в пакеты и сохраняются.
@@ -118,7 +128,9 @@ harness. Test пишет временный stand.json с test-only credential, 
 ## Сборки и воспроизводимость
 
 Windows/Linux hosts собраны повторно побайтно одинаково после EOF fix.
-Актуальные hashes: [runtime-build](../release/runtime-build.json),
+Хеши последней парной сборки хостов: [runtime-build](../release/runtime-build.json).
+Хеш пересобранного для LC-014 `.exe` записан в `dist/packages/packages.json`.
+Остальные данные сборки:
 [engine-build](../release/engine-build.json), [dependency lock](../release/dependencies.lock.json).
 FFmpeg/ffprobe 9.0.2 проверены по исходникам, signature/SHA256 и pinned builder;
 [media packages](../release/media/packages.txt) фиксируют build inputs.

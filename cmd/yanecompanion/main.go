@@ -20,7 +20,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		if len(os.Args) == 1 || os.Args[1] == "desktop" || os.Args[1] == "yanecompanion://open" {
+		if len(os.Args) == 1 || os.Args[1] == "desktop" || isOpenURI(os.Args[1]) {
 			desktop.ReportError(err)
 		}
 		var pathError *os.PathError
@@ -33,10 +33,15 @@ func main() {
 	}
 }
 
+func isOpenURI(arg string) bool {
+	// Windows ShellExecute can add the root path to the protocol URL.
+	return arg == "yanecompanion://open" || arg == "yanecompanion://open/"
+}
+
 func run() error {
 	command := "desktop"
 	args := os.Args[1:]
-	if len(args) == 1 && args[0] == "yanecompanion://open" {
+	if len(args) == 1 && isOpenURI(args[0]) {
 		args = nil
 	}
 	if len(args) > 0 && len(args[0]) > 0 && args[0][0] != '-' {

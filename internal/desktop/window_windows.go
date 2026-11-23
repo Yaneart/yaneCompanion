@@ -170,7 +170,16 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			setView(next)
 		}
 	}
-	showWindow := func() { win("ShowWindow", window, 9); win("SetForegroundWindow", window) }
+	showWindow := func() {
+		win("ShowWindow", window, 9)
+		if win("SetForegroundWindow", window) == 0 {
+			// A browser launch can leave focus with the browser. Raise the window
+			// without activation, then return it to the ordinary window stack.
+			const preserveBoundsAndFocus = 0x0013                                        // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+			win("SetWindowPos", window, ^uintptr(0), 0, 0, 0, 0, preserveBoundsAndFocus) // HWND_TOPMOST
+			win("SetWindowPos", window, ^uintptr(1), 0, 0, 0, 0, preserveBoundsAndFocus) // HWND_NOTOPMOST
+		}
+	}
 	report := func(err error) {
 		if err != nil {
 			setText(220, err.Error())

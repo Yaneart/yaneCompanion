@@ -34,13 +34,13 @@ RestartApplications=no
 AppMutex=Local\yaneCompanion.Runtime
 WizardStyle=modern dark windows11 includetitlebar hidebevels
 WizardBackColor=#101112
-WizardImageFile=wizard-panel.png
-WizardImageBackColor=#111720
-WizardSmallImageFile=wizard-mark.png
-WizardSmallImageBackColor=#101112
-WizardSizePercent=110,110
+WizardImageFile=
+WizardSmallImageFile=
+WizardSizePercent=130,110
+ShowLanguageDialog=no
 DisableWelcomePage=no
 DisableProgramGroupPage=yes
+AlwaysShowDirOnReadyPage=yes
 #ifdef SignedRelease
 SignTool=owner
 SignedUninstaller=yes
@@ -51,30 +51,65 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [Messages]
-en.WelcomeLabel1=Install [name]
-en.WelcomeLabel2=The wizard will install [name] on this computer.
-en.SelectDirBrowseLabel=Click Browse to choose another folder.
-en.ReadyLabel1=The wizard is ready to install [name].
+en.ButtonNext=&Continue
+en.ClickNext=
+en.WelcomeLabel1=Install the companion
+en.WelcomeLabel2=Watch local streams on yaneMedia with this Windows companion.
+en.SelectDirLabel3=
+en.SelectDirBrowseLabel=
+en.WizardSelectTasks=Shortcuts
+en.SelectTasksDesc=Choose where to open Yane.
+en.SelectTasksLabel2=A shortcut is always added to the Start menu.
+en.ReadyLabel1=Review the destination folder and shortcuts.
+en.ReadyLabel2a=
+en.ReadyLabel2b=
 en.InstallingLabel=Installing [name] files.
-en.FinishedHeadingLabel=[name] is installed
-ru.WelcomeLabel1=Установка [name]
-ru.WelcomeLabel2=Мастер установит [name] на этот компьютер.
-ru.SelectDirBrowseLabel=Чтобы выбрать другую папку, нажмите «Обзор».
-ru.ReadyLabel1=Мастер готов установить [name].
+en.FinishedHeadingLabel=Ready to watch
+en.FinishedLabel=Open yaneCompanion and allow access from yaneMedia when prompted.
+en.FinishedLabelNoIcons=Open yaneCompanion and allow access from yaneMedia when prompted.
+en.ClickFinish=
+ru.ButtonNext=&Продолжить
+ru.ClickNext=
+ru.WelcomeLabel1=Установка помощника
+ru.WelcomeLabel2=Смотрите торренты на yaneMedia через приложение для Windows.
+ru.SelectDirLabel3=
+ru.SelectDirBrowseLabel=
+ru.WizardSelectTasks=Ярлыки
+ru.SelectTasksDesc=Выберите, откуда запускать Yane.
+ru.SelectTasksLabel2=Ярлык в меню «Пуск» создаётся автоматически.
+ru.ReadyLabel1=Проверьте папку установки и выбранные ярлыки.
+ru.ReadyLabel2a=
+ru.ReadyLabel2b=
 ru.InstallingLabel=Копируем файлы [name].
-ru.FinishedHeadingLabel=[name] установлен
+ru.FinishedHeadingLabel=Всё готово к просмотру
+ru.FinishedLabel=Откройте yaneCompanion и разрешите подключение с yaneMedia, когда появится запрос.
+ru.FinishedLabelNoIcons=Откройте yaneCompanion и разрешите подключение с yaneMedia, когда появится запрос.
+ru.ClickFinish=
 
 [CustomMessages]
 en.LaunchCompanion=Launch yaneCompanion
 ru.LaunchCompanion=Запустить yaneCompanion
+en.DesktopShortcut=Create a Yane desktop shortcut
+ru.DesktopShortcut=Создать ярлык «Yane» на рабочем столе
+en.UninstallShortcut=Uninstall Yane
+ru.UninstallShortcut=Удалить Yane
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; Flags: unchecked; Check: DesktopShortcutAvailable
 
 [Files]
 Source: "{#BundleDir}\Manrope.ttf"; DestName: "wizard-manrope.ttf"; Flags: dontcopy
+Source: "..\..\internal\desktop\banner.png"; DestName: "wizard-banner.png"; Flags: dontcopy
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "*.exe~"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\yaneCompanion"; Filename: "{app}\yanecompanion.exe"
-Name: "{group}\Удалить yaneCompanion"; Filename: "{uninstallexe}"
+Name: "{group}\Yane"; Filename: "{app}\yanecompanion.exe"
+Name: "{group}\{cm:UninstallShortcut}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Yane"; Filename: "{app}\yanecompanion.exe"; Tasks: desktopicon; Check: DesktopShortcutAvailable
+
+[InstallDelete]
+Type: files; Name: "{group}\yaneCompanion.lnk"
+Type: files; Name: "{group}\Удалить yaneCompanion.lnk"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\yanecompanion"; ValueType: string; ValueData: "URL:yaneCompanion"; Flags: uninsdeletekey
@@ -98,18 +133,106 @@ function AddFontResourceEx(FileName: String; Flags, Reserved: LongWord): Integer
 function RemoveFontResourceEx(FileName: String; Flags, Reserved: LongWord): Boolean;
   external 'RemoveFontResourceExW@gdi32.dll stdcall setuponly';
 
+function DesktopShortcutAvailable(): Boolean;
+begin
+  Result := not FileExists(ExpandConstant('{autodesktop}\Yane.lnk'));
+end;
+
+procedure LayoutActionButtons();
+var
+  ButtonWidth, ButtonHeight, Gap, Right: Integer;
+begin
+  ButtonWidth := ScaleX(105);
+  ButtonHeight := ScaleY(28);
+  Gap := ScaleX(8);
+  Right := WizardForm.ClientWidth - ScaleX(20);
+  WizardForm.CancelButton.SetBounds(Right - ButtonWidth, WizardForm.ClientHeight - ButtonHeight - ScaleY(12), ButtonWidth, ButtonHeight);
+  WizardForm.NextButton.SetBounds(WizardForm.CancelButton.Left - ButtonWidth - Gap, WizardForm.CancelButton.Top, ButtonWidth, ButtonHeight);
+  WizardForm.BackButton.SetBounds(WizardForm.NextButton.Left - ButtonWidth - Gap, WizardForm.CancelButton.Top, ButtonWidth, ButtonHeight);
+end;
+
+procedure LayoutIntroPage(Heading, Body: TNewStaticText);
+var
+  Margin, Width: Integer;
+begin
+  Margin := ScaleX(20);
+  Width := Heading.Parent.ClientWidth - 2 * Margin;
+  Heading.Font.Size := 16;
+  Heading.SetBounds(Margin, ScaleY(16), Width, ScaleY(32));
+  Body.SetBounds(Margin, ScaleY(52), Width, Body.Height);
+end;
+
+procedure AddWatermark();
+var
+  Clip: TPanel;
+  Watermark: TBitmapImage;
+begin
+  ExtractTemporaryFile('wizard-banner.png');
+  Clip := TPanel.Create(WizardForm);
+  Clip.Parent := WizardForm;
+  Clip.StyleElements := [];
+  Clip.ParentBackground := False;
+  Clip.BevelOuter := bvNone;
+  Clip.Color := $121110;
+  Clip.SetBounds(WizardForm.ClientWidth - ScaleX(167), 0, ScaleX(147), ScaleY(48));
+  Watermark := TBitmapImage.Create(Clip);
+  Watermark.Parent := Clip;
+  Watermark.PngImage.LoadFromFile(ExpandConstant('{tmp}\wizard-banner.png'));
+  Watermark.BackColor := Clip.Color;
+  Watermark.Stretch := True;
+  { Show only the right half of the shared banner, which holds the watermark. }
+  Watermark.SetBounds(-Clip.Width, 0, 2 * Clip.Width, Clip.Height);
+end;
+
 procedure InitializeWizard();
+var
+  Brand: TNewStaticText;
+  HeaderHeight: Integer;
 begin
   ExtractTemporaryFile('wizard-manrope.ttf');
   WizardFontPath := ExpandConstant('{tmp}\wizard-manrope.ttf');
-  if AddFontResourceEx(WizardFontPath, FR_PRIVATE, 0) = 0 then begin
+  if AddFontResourceEx(WizardFontPath, FR_PRIVATE, 0) <> 0 then begin
+    WizardForm.Font.Name := 'Manrope';
+    WizardForm.WelcomeLabel1.Font.Name := 'Manrope';
+    WizardForm.PageNameLabel.Font.Name := 'Manrope';
+    WizardForm.FinishedHeadingLabel.Font.Name := 'Manrope';
+  end else begin
     WizardFontPath := '';
-    Exit;
   end;
-  WizardForm.Font.Name := 'Manrope';
-  WizardForm.WelcomeLabel1.Font.Name := 'Manrope';
-  WizardForm.PageNameLabel.Font.Name := 'Manrope';
-  WizardForm.FinishedHeadingLabel.Font.Name := 'Manrope';
+
+  AddWatermark();
+  Brand := TNewStaticText.Create(WizardForm);
+  Brand.Parent := WizardForm;
+  Brand.Caption := 'yaneCompanion';
+  Brand.Font.Size := 20;
+  Brand.Font.Style := [fsBold];
+  Brand.Left := ScaleX(20);
+  Brand.Top := ScaleY(12);
+  HeaderHeight := ScaleY(50);
+  WizardForm.OuterNotebook.Height := WizardForm.OuterNotebook.Height - HeaderHeight;
+  WizardForm.OuterNotebook.Top := WizardForm.OuterNotebook.Top + HeaderHeight;
+
+  LayoutIntroPage(WizardForm.WelcomeLabel1, WizardForm.WelcomeLabel2);
+  LayoutIntroPage(WizardForm.FinishedHeadingLabel, WizardForm.FinishedLabel);
+  WizardForm.RunList.Left := ScaleX(20);
+  WizardForm.RunList.Width := WizardForm.FinishedLabel.Width;
+  WizardForm.SelectDirBitmapImage.Visible := False;
+  WizardForm.SelectDirLabel.Visible := False;
+  WizardForm.SelectDirBrowseLabel.Visible := False;
+  WizardForm.DirEdit.Top := ScaleY(18);
+  WizardForm.DirBrowseButton.Top := WizardForm.DirEdit.Top - ScaleY(2);
+  WizardForm.ReadyMemo.WordWrap := True;
+  WizardForm.ReadyMemo.ScrollBars := ssVertical;
+  LayoutActionButtons();
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpSelectDir then begin
+    WizardForm.ActiveControl := WizardForm.NextButton;
+    WizardForm.DirEdit.SelStart := 0;
+    WizardForm.DirEdit.SelLength := 0;
+  end;
 end;
 
 procedure DeinitializeSetup();

@@ -17,6 +17,15 @@ import (
 
 var user32 = windows.NewLazySystemDLL("user32.dll")
 var shell32 = windows.NewLazySystemDLL("shell32.dll")
+var commonControls = windows.NewLazySystemDLL("comctl32.dll")
+
+var buttonProcedure = syscall.NewCallback(func(button uintptr, id uint32, w, l, _, _ uintptr) uintptr {
+	if id == 0x14 { // WM_ERASEBKGND: WM_DRAWITEM fills the entire button.
+		return 1
+	}
+	result, _, _ := commonControls.NewProc("DefSubclassProc").Call(button, uintptr(id), w, l)
+	return result
+})
 
 func win(name string, args ...any) uintptr {
 	values := make([]uintptr, len(args))
@@ -99,6 +108,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	theme := newWindowTheme()
 	defer theme.close()
 	var window uintptr
+	var caption windowCaption
 	var fade pageFade
 	controls := map[uintptr]uintptr{}
 	page := connections
@@ -151,7 +161,8 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 				visible(id, show)
 			}
 		}
-		win("RedrawWindow", window, 0, 0, 0xa1) // invalidate the completed page and its children without erasing first
+		// Paint the parent and the newly visible controls before returning to the fade timer.
+		win("RedrawWindow", window, 0, 0, 0x1a1) // invalidate, no erase, all children, update now
 	}
 	navigate := func(next int) {
 		if next != page {
@@ -191,6 +202,10 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			return 0
 		}
 		switch id {
+		case 0x83: // WM_NCCALCSIZE: draw the caption inside the client area.
+			return 0
+		case 0x84: // WM_NCHITTEST
+			return caption.hitTest(hwnd, l)
 		case 0x14: // WM_ERASEBKGND; WM_PAINT presents a complete back buffer
 			return 1
 		case 0x0f: // WM_PAINT
@@ -199,9 +214,15 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 		case 0x2b: // WM_DRAWITEM
 			var item drawItem
 			windows.NewLazySystemDLL("kernel32.dll").NewProc("RtlMoveMemory").Call(uintptr(unsafe.Pointer(&item)), l, unsafe.Sizeof(item))
+			if item.id == captionMinimize || item.id == captionClose {
+				theme.captionButton(&item, caption.hover == item.window)
+				return 1
+			}
 			selected := item.id == 135 && page == connections || item.id == 130 && page == settings || item.id == 132 && (page == updates || page == diagnosticView)
 			theme.button(&item, selected)
 			return 1
+		case 0x135: // WM_CTLCOLORBTN
+			return theme.buttonBackground(win("GetDlgCtrlID", l))
 		case 0x133, 0x134, 0x138: // edit, list box and static control colors
 			element := win("GetDlgCtrlID", l)
 			color, fill, brush := ink, surface, theme.surfaceBrush
@@ -272,6 +293,13 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 		case 0x111:
 			command := w & 0xffff
 			switch command {
+			case captionMinimize:
+				fade.stop()
+				win("SendMessageW", hwnd, 0x112, 0xf020, 0) // SC_MINIMIZE
+				return 0
+			case captionClose:
+				win("SendMessageW", hwnd, 0x10, 0, 0)
+				return 0
 			case 130, 134:
 				navigate(settings)
 				win("SetFocus", controls[101])
@@ -357,10 +385,8 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 		return errors.New("DESKTOP_UNAVAILABLE")
 	}
 	defer win("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
-	const style = 0x02ca0000 // caption, system menu, minimize and clipped child painting
-	bounds := rect{right: 560, bottom: 470}
-	win("AdjustWindowRectEx", uintptr(unsafe.Pointer(&bounds)), style, 0, 0)
-	window = win("CreateWindowExW", 0, uintptr(unsafe.Pointer(class.Name)), wide(windowTitle), style, 0x80000000, 0x80000000, int(bounds.right-bounds.left), int(bounds.bottom-bounds.top), 0, 0, uintptr(instance), 0)
+	const style = 0x02ca0000 // keep system menu, minimize and clipped child painting
+	window = win("CreateWindowExW", 0, uintptr(unsafe.Pointer(class.Name)), wide(windowTitle), style, 0x80000000, 0x80000000, windowWidth, windowHeight, 0, 0, uintptr(instance), 0)
 	if window == 0 {
 		return errors.New("DESKTOP_UNAVAILABLE")
 	}
@@ -369,12 +395,16 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	if result, _, _ := dwm.Call(window, 20, uintptr(unsafe.Pointer(&dark)), 4); result != 0 {
 		dwm.Call(window, 19, uintptr(unsafe.Pointer(&dark)), 4)
 	}
+	roundWindow(window)
 	add := func(view int, kind, text string, id uintptr, x, y, width, height int, style, font uintptr) {
 		if view < 0 {
 			style |= 0x10000000
 		}
 		handle := win("CreateWindowExW", 0, wide(kind), wide(text), 0x40000000|style, x, y, width, height, window, id, uintptr(instance), 0)
 		controls[id] = handle
+		if kind == "BUTTON" {
+			commonControls.NewProc("SetWindowSubclass").Call(handle, buttonProcedure, 1, 0)
+		}
 		win("SendMessageW", handle, 0x30, font, 1)
 		if view >= 0 {
 			pages[view] = append(pages[view], id)
@@ -386,9 +416,9 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	label := func(view int, text string, id uintptr, x, y, width, height int, font uintptr) {
 		add(view, "STATIC", text, id, x, y, width, height, 0, font)
 	}
-	button(-1, "Подключение", 135, 24, 96, 162)
-	button(-1, "Настройки", 130, 197, 96, 162)
-	button(-1, "Поддержка", 132, 370, 96, 166)
+	button(-1, "Подключение", 135, 29, 101, 166)
+	button(-1, "Настройки", 130, 197, 101, 166)
+	button(-1, "Поддержка", 132, 365, 101, 166)
 	label(connections, "", 204, 46, 190, 468, 38, theme.title)
 	label(connections, "", 202, 46, 236, 444, 50, theme.body)
 	label(connections, "Адрес сайта", 217, 46, 301, 468, 22, theme.caption)
@@ -428,6 +458,9 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	button(diagnosticView, "Скопировать отчёт", 306, 130, 421, 179)
 	add(-1, "STATIC", release.Version, 209, 426, 428, 110, 20, 2, theme.caption)
 	label(-1, "", 220, 24, 428, 385, 35, theme.caption)
+	add(-1, "BUTTON", "Свернуть", captionMinimize, 450, 12, 40, 32, 0x1000b, theme.caption)
+	add(-1, "BUTTON", "Закрыть", captionClose, 496, 12, 40, 32, 0x1000b, theme.caption)
+	caption.attach(controls[captionMinimize], controls[captionClose])
 	fade = newPageFade(window, uintptr(instance))
 
 	lastText := map[uintptr]string{}

@@ -93,6 +93,8 @@ func newWindowTheme() windowTheme {
 	gdiPlus.NewProc("GdiplusStartup").Call(uintptr(unsafe.Pointer(&t.gdiToken)), uintptr(unsafe.Pointer(&startup)), 0)
 	if img, err := png.Decode(bytes.NewReader(banner)); err == nil {
 		b := img.Bounds()
+		// The shared banner's left half contains the icon tile used by GTK.
+		b.Min.X += b.Dx() / 2
 		t.bannerHeader = bitmapHeader{size: 40, width: int32(b.Dx()), height: -int32(b.Dy()), planes: 1, bits: 32}
 		t.bannerPixels = make([]uint32, 0, b.Dx()*b.Dy())
 		for y := b.Min.Y; y < b.Max.Y; y++ {
@@ -147,16 +149,18 @@ func (t windowTheme) paint(window uintptr, page int) {
 
 func (t windowTheme) drawPage(dc uintptr, client rect, page int) {
 	win("FillRect", dc, uintptr(unsafe.Pointer(&client)), t.backgroundBrush)
+	roundedRect(dc, client, windowCurve-2, background, border)
 	if len(t.bannerPixels) > 0 {
 		gdi.NewProc("SetStretchBltMode").Call(dc, 4)
-		gdi.NewProc("StretchDIBits").Call(dc, 24, 12, 512, 84, 0, 0,
+		gdi.NewProc("StretchDIBits").Call(dc, 280, 12, 256, 84, 0, 0,
 			uintptr(t.bannerHeader.width), uintptr(-t.bannerHeader.height), uintptr(unsafe.Pointer(&t.bannerPixels[0])),
 			uintptr(unsafe.Pointer(&t.bannerHeader)), 0, 0x00cc0020)
 		runtime.KeepAlive(t.bannerPixels)
 	}
-	drawText(dc, t.title, ink, rect{87, 26, 365, 62}, windowTitle, 0x20)
-	drawText(dc, t.caption, muted, rect{89, 60, 365, 80}, windowSubtitle, 0x20)
-	roundedRect(dc, rect{24, 147, 536, 410}, 34, surface, border)
+	drawText(dc, t.title, ink, rect{24, 25, 365, 61}, windowTitle, 0x20)
+	drawText(dc, t.caption, muted, rect{25, 58, 365, 80}, windowSubtitle, 0x20)
+	roundedRect(dc, rect{24, 96, 536, 140}, 26, surface, border)
+	roundedRect(dc, rect{24, 153, 536, 410}, 40, surface, border)
 	if page == 1 {
 		roundedRect(dc, rect{46, 222, 391, 258}, 18, elevated, border)
 		roundedRect(dc, rect{46, 336, 377, 391}, 18, elevated, border)
@@ -224,6 +228,15 @@ func drawText(dc, font, color uintptr, box rect, text string, flags int) {
 	gdi.NewProc("SelectObject").Call(dc, old)
 }
 
+func (t windowTheme) buttonBackground(id uintptr) uintptr {
+	switch id {
+	case captionMinimize, captionClose, 133, 306:
+		return t.backgroundBrush
+	default:
+		return t.surfaceBrush
+	}
+}
+
 func (t windowTheme) button(item *drawItem, selected bool) {
 	if item.controlType != 4 {
 		return
@@ -245,12 +258,15 @@ func (t windowTheme) button(item *drawItem, selected bool) {
 		stroke = accent
 	}
 	box := item.bounds
-	if item.id == 130 || item.id == 132 || item.id == 135 || item.id == 133 || item.id == 306 {
-		win("FillRect", item.dc, uintptr(unsafe.Pointer(&box)), t.backgroundBrush)
-	} else {
-		win("FillRect", item.dc, uintptr(unsafe.Pointer(&box)), t.surfaceBrush)
+	win("FillRect", item.dc, uintptr(unsafe.Pointer(&box)), t.buttonBackground(uintptr(item.id)))
+	tab := item.id == 130 || item.id == 132 || item.id == 135
+	if tab && !selected && item.state&0x1 == 0 {
+		fill, stroke, text = surface, surface, muted
+		if item.state&0x10 != 0 {
+			stroke = accent
+		}
 	}
-	roundedRect(item.dc, box, 24, fill, stroke)
+	roundedRect(item.dc, box, 18, fill, stroke)
 	buf := [160]uint16{}
 	win("GetWindowTextW", item.window, &buf[0], len(buf))
 	drawText(item.dc, t.body, text, box, windows.UTF16ToString(buf[:]), 0x1|0x4|0x20)

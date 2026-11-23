@@ -64,7 +64,7 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 		Snapshot: func() desktop.Snapshot {
 			mu.Lock()
 			defer mu.Unlock()
-			s := desktop.Snapshot{Status: status, Site: settings.Site(), LaunchOrigin: launchOrigin, Autostart: desktop.AutostartEnabled(), Ready: store != nil, UpdatesAvailable: maintenance.configured()}
+			s := desktop.Snapshot{Status: status, Site: settings.Site(), Theme: settings.Theme(), LaunchOrigin: launchOrigin, Autostart: desktop.AutostartEnabled(), Ready: store != nil, UpdatesAvailable: maintenance.configured()}
 			if store != nil {
 				s.Requests, s.Grants = store.Snapshot()
 			}
@@ -99,6 +99,7 @@ func Desktop(ctx context.Context, options Options, hidden bool) error {
 			}
 			return nil
 		},
+		SetTheme:  settings.SetTheme,
 		Autostart: desktop.SetAutostart,
 		Decide: func(r pairing.Request, approve bool) error {
 			mu.Lock()

@@ -32,10 +32,13 @@ SolidCompression=yes
 CloseApplications=no
 RestartApplications=no
 AppMutex=Local\yaneCompanion.Runtime
-WizardStyle=modern dark windows11 includetitlebar hidebevels
-WizardBackColor=#101112
+WizardStyle=modern dynamic windows11 includetitlebar hidebevels
+WizardBackColor=#EBEAE5
+WizardBackColorDynamicDark=#101112
 WizardImageFile=
+WizardImageFileDynamicDark=
 WizardSmallImageFile=
+WizardSmallImageFileDynamicDark=
 WizardSizePercent=130,110
 ShowLanguageDialog=no
 DisableWelcomePage=no
@@ -100,6 +103,7 @@ Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; Flags: unchecked; Chec
 [Files]
 Source: "{#BundleDir}\Manrope.ttf"; DestName: "wizard-manrope.ttf"; Flags: dontcopy
 Source: "..\..\internal\desktop\banner.png"; DestName: "wizard-banner.png"; Flags: dontcopy
+Source: "..\..\internal\desktop\banner-light.png"; DestName: "wizard-banner-light.png"; Flags: dontcopy
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Excludes: "*.exe~"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -166,18 +170,26 @@ procedure AddWatermark();
 var
   Clip: TPanel;
   Watermark: TBitmapImage;
+  BannerFile: String;
 begin
-  ExtractTemporaryFile('wizard-banner.png');
+  if HighContrastActive then Exit;
   Clip := TPanel.Create(WizardForm);
   Clip.Parent := WizardForm;
   Clip.StyleElements := [];
   Clip.ParentBackground := False;
   Clip.BevelOuter := bvNone;
-  Clip.Color := $121110;
+  if IsDarkInstallMode then begin
+    Clip.Color := $121110;
+    BannerFile := 'wizard-banner.png';
+  end else begin
+    Clip.Color := $E5EAEB;
+    BannerFile := 'wizard-banner-light.png';
+  end;
+  ExtractTemporaryFile(BannerFile);
   Clip.SetBounds(WizardForm.ClientWidth - ScaleX(167), 0, ScaleX(147), ScaleY(48));
   Watermark := TBitmapImage.Create(Clip);
   Watermark.Parent := Clip;
-  Watermark.PngImage.LoadFromFile(ExpandConstant('{tmp}\wizard-banner.png'));
+  Watermark.PngImage.LoadFromFile(ExpandConstant('{tmp}\' + BannerFile));
   Watermark.BackColor := Clip.Color;
   Watermark.Stretch := True;
   { Show only the right half of the shared banner, which holds the watermark. }

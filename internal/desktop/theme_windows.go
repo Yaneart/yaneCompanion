@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 var gdi = windows.NewLazySystemDLL("gdi32.dll")
@@ -18,15 +19,28 @@ var gdiPlus = windows.NewLazySystemDLL("gdiplus.dll")
 
 func rgb(r, g, b byte) uintptr { return uintptr(r) | uintptr(g)<<8 | uintptr(b)<<16 }
 
-var (
-	background = rgb(16, 17, 18)
-	surface    = rgb(25, 26, 27)
-	elevated   = rgb(34, 35, 37)
-	border     = rgb(48, 50, 53)
-	ink        = rgb(241, 240, 236)
-	muted      = rgb(153, 155, 157)
-	accent     = rgb(111, 148, 223)
-)
+func (c themeColor) win() uintptr { return rgb(byte(c>>16), byte(c>>8), byte(c)) }
+
+func systemDark() bool {
+	key, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer key.Close()
+	light, _, err := key.GetIntegerValue("AppsUseLightTheme")
+	return err == nil && light == 0
+}
+
+func applyWindowMode(window uintptr, dark bool) {
+	var enabled int32
+	if dark {
+		enabled = 1
+	}
+	dwm := windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmSetWindowAttribute")
+	if result, _, _ := dwm.Call(window, 20, uintptr(unsafe.Pointer(&enabled)), 4); result != 0 {
+		dwm.Call(window, 19, uintptr(unsafe.Pointer(&enabled)), 4)
+	}
+}
 
 type rect struct{ left, top, right, bottom int32 }
 
@@ -52,6 +66,8 @@ type bitmapHeader struct {
 }
 
 type windowTheme struct {
+	colors                                    palette
+	dark                                      bool
 	backgroundBrush, surfaceBrush, fieldBrush uintptr
 	body, heading, title, caption             uintptr
 	fontPath                                  string
@@ -71,10 +87,9 @@ func solidBrush(color uintptr) uintptr {
 	return result
 }
 
-func newWindowTheme() windowTheme {
-	t := windowTheme{
-		backgroundBrush: solidBrush(background), surfaceBrush: solidBrush(surface), fieldBrush: solidBrush(elevated),
-	}
+func newWindowTheme(dark bool) windowTheme {
+	var t windowTheme
+	t.setColors(dark)
 	family := "Segoe UI"
 	if exe, err := os.Executable(); err == nil {
 		path := filepath.Join(filepath.Dir(exe), "Manrope.ttf")
@@ -91,7 +106,22 @@ func newWindowTheme() windowTheme {
 	}
 	startup.version = 1
 	gdiPlus.NewProc("GdiplusStartup").Call(uintptr(unsafe.Pointer(&t.gdiToken)), uintptr(unsafe.Pointer(&startup)), 0)
-	if img, err := png.Decode(bytes.NewReader(banner)); err == nil {
+	return t
+}
+
+func (t *windowTheme) setColors(dark bool) {
+	t.closeBrushes()
+	t.dark = dark
+	t.colors = desktopPalette(dark)
+	t.backgroundBrush = solidBrush(t.colors.background.win())
+	t.surfaceBrush = solidBrush(t.colors.surface.win())
+	t.fieldBrush = solidBrush(t.colors.elevated.win())
+	image := lightBanner
+	if dark {
+		image = banner
+	}
+	t.bannerPixels = nil
+	if img, err := png.Decode(bytes.NewReader(image)); err == nil {
 		b := img.Bounds()
 		// The shared banner's left half contains the icon tile used by GTK.
 		b.Min.X += b.Dx() / 2
@@ -104,15 +134,24 @@ func newWindowTheme() windowTheme {
 					a := uint32(p.A)
 					return (uint32(channel)*a + uint32(base)*(255-a)) / 255
 				}
-				t.bannerPixels = append(t.bannerPixels, blend(p.R, 16)<<16|blend(p.G, 17)<<8|blend(p.B, 18))
+				base := t.colors.background
+				t.bannerPixels = append(t.bannerPixels, blend(p.R, byte(base>>16))<<16|blend(p.G, byte(base>>8))<<8|blend(p.B, byte(base)))
 			}
 		}
 	}
-	return t
+}
+
+func (t windowTheme) closeBrushes() {
+	for _, handle := range []uintptr{t.backgroundBrush, t.surfaceBrush, t.fieldBrush} {
+		if handle != 0 {
+			gdi.NewProc("DeleteObject").Call(handle)
+		}
+	}
 }
 
 func (t windowTheme) close() {
-	for _, handle := range []uintptr{t.backgroundBrush, t.surfaceBrush, t.fieldBrush, t.body, t.heading, t.title, t.caption} {
+	t.closeBrushes()
+	for _, handle := range []uintptr{t.body, t.heading, t.title, t.caption} {
 		gdi.NewProc("DeleteObject").Call(handle)
 	}
 	if t.fontPath != "" {
@@ -148,8 +187,9 @@ func (t windowTheme) paint(window uintptr, page int) {
 }
 
 func (t windowTheme) drawPage(dc uintptr, client rect, page int) {
+	p := t.colors
 	win("FillRect", dc, uintptr(unsafe.Pointer(&client)), t.backgroundBrush)
-	roundedRect(dc, client, windowCurve-2, background, border)
+	roundedRect(dc, client, windowCurve-2, p.background.win(), p.border.win())
 	if len(t.bannerPixels) > 0 {
 		gdi.NewProc("SetStretchBltMode").Call(dc, 4)
 		gdi.NewProc("StretchDIBits").Call(dc, 280, 12, 256, 84, 0, 0,
@@ -157,16 +197,16 @@ func (t windowTheme) drawPage(dc uintptr, client rect, page int) {
 			uintptr(unsafe.Pointer(&t.bannerHeader)), 0, 0x00cc0020)
 		runtime.KeepAlive(t.bannerPixels)
 	}
-	drawText(dc, t.title, ink, rect{24, 25, 365, 61}, windowTitle, 0x20)
-	drawText(dc, t.caption, muted, rect{25, 58, 365, 80}, windowSubtitle, 0x20)
-	roundedRect(dc, rect{24, 96, 536, 140}, 26, surface, border)
-	roundedRect(dc, rect{24, 153, 536, 410}, 40, surface, border)
+	drawText(dc, t.title, p.ink.win(), rect{24, 25, 365, 61}, windowTitle, 0x20)
+	drawText(dc, t.caption, p.muted.win(), rect{25, 58, 365, 80}, windowSubtitle, 0x20)
+	roundedRect(dc, rect{navX, headerHeight, navX + navWidth, headerHeight + navHeight}, 26, p.surface.win(), p.border.win())
+	roundedRect(dc, rect{panelX, panelY, panelX + panelWidth, panelY + panelHeight}, 40, p.surface.win(), p.border.win())
 	if page == 1 {
-		roundedRect(dc, rect{46, 222, 391, 258}, 18, elevated, border)
-		roundedRect(dc, rect{46, 336, 377, 391}, 18, elevated, border)
+		roundedRect(dc, rect{46, 196, 391, 232}, 18, p.elevated.win(), p.border.win())
+		roundedRect(dc, rect{46, 349, 377, 402}, 18, p.elevated.win(), p.border.win())
 	}
 	if page == 3 {
-		roundedRect(dc, rect{46, 230, 512, 390}, 24, elevated, border)
+		roundedRect(dc, rect{46, 230, 512, 390}, 24, p.elevated.win(), p.border.win())
 	}
 }
 
@@ -241,33 +281,33 @@ func (t windowTheme) button(item *drawItem, selected bool) {
 	if item.controlType != 4 {
 		return
 	}
-	fill, stroke, text := elevated, border, ink
+	p := t.colors
+	fill, stroke, text := p.elevated, p.border, p.ink
 	if item.id == 105 || item.id == 102 || item.id == 134 {
-		fill, stroke, text = rgb(181, 205, 250), rgb(181, 205, 250), rgb(16, 28, 50)
+		fill, stroke, text = p.action, p.action, p.actionText
 	}
 	if selected {
-		fill, stroke, text = rgb(32, 44, 66), rgb(52, 73, 108), rgb(189, 211, 251)
+		fill, stroke, text = p.selected, p.selectedBorder, p.selectedText
 	}
 	if item.state&0x4 != 0 {
-		fill, stroke, text = surface, border, muted
+		fill, stroke, text = p.surface, p.border, p.muted
 	} else if item.state&0x1 != 0 {
-		fill = rgb(57, 67, 85)
-		text = ink
+		fill, text = p.pressed, p.ink
 	}
 	if item.state&0x10 != 0 {
-		stroke = accent
+		stroke = p.accent
 	}
 	box := item.bounds
 	win("FillRect", item.dc, uintptr(unsafe.Pointer(&box)), t.buttonBackground(uintptr(item.id)))
 	tab := item.id == 130 || item.id == 132 || item.id == 135
 	if tab && !selected && item.state&0x1 == 0 {
-		fill, stroke, text = surface, surface, muted
+		fill, stroke, text = p.surface, p.surface, p.muted
 		if item.state&0x10 != 0 {
-			stroke = accent
+			stroke = p.accent
 		}
 	}
-	roundedRect(item.dc, box, 18, fill, stroke)
+	roundedRect(item.dc, box, 18, fill.win(), stroke.win())
 	buf := [160]uint16{}
 	win("GetWindowTextW", item.window, &buf[0], len(buf))
-	drawText(item.dc, t.body, text, box, windows.UTF16ToString(buf[:]), 0x1|0x4|0x20)
+	drawText(item.dc, t.body, text.win(), box, windows.UTF16ToString(buf[:]), 0x1|0x4|0x20)
 }

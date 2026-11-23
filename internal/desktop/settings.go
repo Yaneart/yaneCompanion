@@ -15,39 +15,56 @@ import (
 var SiteOrigin string
 
 type Settings struct {
-	mu         sync.RWMutex
-	path, site string
+	mu   sync.RWMutex
+	path string
+	data desktopSettings
+}
+
+type desktopSettings struct {
+	Site   *string   `json:"site,omitempty"`
+	Theme  ThemeMode `json:"theme,omitempty"`
+	Schema int       `json:"schema,omitempty"`
 }
 
 func OpenSettings(directory string) (*Settings, error) {
-	s := &Settings{path: filepath.Join(directory, "desktop.json"), site: SiteOrigin}
+	s := &Settings{path: filepath.Join(directory, "desktop.json")}
 	info, err := os.Lstat(s.path)
 	if err == nil {
 		if !info.Mode().IsRegular() || info.Size() > 4096 {
 			return nil, errors.New("SETTINGS_UNAVAILABLE")
 		}
 		data, err := os.ReadFile(s.path)
-		var value struct {
-			Site   string `json:"site"`
-			Schema int    `json:"schema,omitempty"`
-		}
+		var value desktopSettings
 		if err != nil || json.Unmarshal(data, &value) != nil {
 			return nil, errors.New("SETTINGS_UNAVAILABLE")
 		}
 		if value.Schema != 0 && value.Schema != 1 {
 			return nil, errors.New("SETTINGS_UNAVAILABLE")
 		}
-		s.site = value.Site
+		s.data = value
 	} else if !os.IsNotExist(err) {
 		return nil, errors.New("SETTINGS_UNAVAILABLE")
 	}
-	if s.site != "" && !config.ValidOrigin(s.site) {
+	if site := s.Site(); site != "" && !config.ValidOrigin(site) {
 		return nil, errors.New("INVALID_SITE_ORIGIN")
+	}
+	if !s.data.Theme.valid() {
+		s.data.Theme = ThemeSystem
 	}
 	return s, nil
 }
 
-func (s *Settings) Site() string { s.mu.RLock(); defer s.mu.RUnlock(); return s.site }
+func (s *Settings) Site() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data.Site == nil {
+		return SiteOrigin
+	}
+	return *s.data.Site
+}
+
+func (s *Settings) Theme() ThemeMode { s.mu.RLock(); defer s.mu.RUnlock(); return s.data.Theme }
+
 func (s *Settings) Allowed(origin string) bool {
 	return origin != "" && origin == s.Site() && config.ValidOrigin(origin)
 }
@@ -58,11 +75,29 @@ func (s *Settings) SetSite(site string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := writePrivateJSON(s.path, struct {
-		Site string `json:"site"`
-	}{site}); err != nil {
+	next := s.data
+	next.Site = &site
+	return s.save(next)
+}
+
+func (s *Settings) SetTheme(mode ThemeMode) error {
+	if !mode.valid() {
+		return errors.New("Неизвестная тема оформления")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.Theme == mode {
+		return nil
+	}
+	next := s.data
+	next.Theme = mode
+	return s.save(next)
+}
+
+func (s *Settings) save(next desktopSettings) error {
+	if err := writePrivateJSON(s.path, next); err != nil {
 		return err
 	}
-	s.site = site
+	s.data = next
 	return nil
 }

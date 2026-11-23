@@ -46,6 +46,47 @@ func TestSettingsExactOriginAndPersistence(t *testing.T) {
 	}
 }
 
+func TestSettingsThemePersistence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "desktop.json")
+	if err := os.WriteFile(path, []byte(`{"site":"https://media.example"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := OpenSettings(dir)
+	if err != nil || settings.Theme() != ThemeSystem {
+		t.Fatalf("legacy settings should use the system theme: %v", err)
+	}
+	if err := settings.SetTheme(ThemeLight); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = OpenSettings(dir)
+	if err != nil || settings.Theme() != ThemeLight || settings.Site() != "https://media.example" {
+		t.Fatalf("theme or site lost across reopen: %v", err)
+	}
+	if err := settings.SetSite("https://new.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.SetTheme("unknown"); err == nil {
+		t.Fatal("invalid theme accepted")
+	}
+	settings, err = OpenSettings(dir)
+	if err != nil || settings.Theme() != ThemeLight || settings.Site() != "https://new.example" {
+		t.Fatalf("site update changed the saved theme: %v", err)
+	}
+	for _, test := range []struct {
+		mode        ThemeMode
+		light, dark bool
+	}{
+		{ThemeSystem, false, true},
+		{ThemeLight, false, false},
+		{ThemeDark, true, true},
+	} {
+		if test.mode.dark(false) != test.light || test.mode.dark(true) != test.dark {
+			t.Errorf("wrong appearance for %s", test.mode)
+		}
+	}
+}
+
 func TestSettingsRejectCorruptOrUnsafeFiles(t *testing.T) {
 	for _, data := range []string{"{", `{"site":"http://media.example"}`, `{"site":"https://watch.example","schema":2}`, string(make([]byte, 4097))} {
 		dir := t.TempDir()

@@ -15,6 +15,17 @@ var banner []byte
 const (
 	windowTitle    = "yaneCompanion"
 	windowSubtitle = "Локальный просмотр yaneMedia"
+	windowWidth    = 560
+	windowHeight   = 470
+	windowCurve    = 24
+	headerHeight   = 96
+	navX           = 24
+	navWidth       = 512
+	navHeight      = 44
+	panelX         = 24
+	panelY         = 153
+	panelWidth     = 512
+	panelHeight    = 257
 )
 
 func (s Snapshot) connectionText() (title, body string) {
@@ -44,6 +55,7 @@ func (s Snapshot) ActiveSite() string {
 
 type Snapshot struct {
 	Status, Site, Activity string
+	Theme                  ThemeMode
 	LaunchOrigin           string
 	Update                 string
 	UpdatesAvailable       bool
@@ -56,6 +68,7 @@ type Snapshot struct {
 type Actions struct {
 	Snapshot       func() Snapshot
 	SetSite        func(string) error
+	SetTheme       func(ThemeMode) error
 	Autostart      func(bool) error
 	Decide         func(pairing.Request, bool) error
 	Revoke         func(string) error

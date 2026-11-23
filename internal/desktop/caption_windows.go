@@ -8,9 +8,6 @@ import (
 const (
 	captionMinimize = 140
 	captionClose    = 141
-	windowWidth     = 560
-	windowHeight    = 470
-	windowCurve     = 24
 )
 
 func roundWindow(window uintptr) {
@@ -30,7 +27,7 @@ func (c *windowCaption) hitTest(window, position uintptr) uintptr {
 	p := point{X: int32(int16(position)), Y: int32(int16(position >> 16))}
 	screen := p
 	win("ScreenToClient", window, uintptr(unsafe.Pointer(&p)))
-	if p.Y < 0 || p.Y >= 96 {
+	if p.Y < 0 || p.Y >= headerHeight {
 		return 1 // HTCLIENT
 	}
 	for _, button := range c.buttons {
@@ -81,18 +78,19 @@ func (c *windowCaption) attach(minimize, closeButton uintptr) {
 func (t windowTheme) captionButton(item *drawItem, hover bool) {
 	box := item.bounds
 	win("FillRect", item.dc, uintptr(unsafe.Pointer(&box)), t.backgroundBrush)
-	fill, stroke, inkColor := surface, border, muted
+	p := t.colors
+	fill, stroke, inkColor := p.surface.win(), p.border.win(), p.muted.win()
 	if hover || item.state&1 != 0 {
-		fill, stroke, inkColor = elevated, border, ink
+		fill, stroke, inkColor = p.elevated.win(), p.border.win(), p.ink.win()
 		if item.id == captionClose {
-			fill, stroke, inkColor = rgb(88, 36, 42), rgb(120, 50, 58), rgb(255, 216, 219)
+			fill, stroke, inkColor = p.closeFill.win(), p.closeBorder.win(), p.closeText.win()
 		}
 		if item.state&1 != 0 {
 			fill = stroke
 		}
 	}
 	if item.state&0x10 != 0 {
-		stroke = accent
+		stroke = p.accent.win()
 	}
 	box = rect{box.left + 1, box.top + 1, box.right - 1, box.bottom - 1}
 	roundedRect(item.dc, box, 14, fill, stroke)

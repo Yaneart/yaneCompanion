@@ -19,6 +19,8 @@ var user32 = windows.NewLazySystemDLL("user32.dll")
 var shell32 = windows.NewLazySystemDLL("shell32.dll")
 var commonControls = windows.NewLazySystemDLL("comctl32.dll")
 
+const themeButtonStart = 150
+
 var buttonProcedure = syscall.NewCallback(func(button uintptr, id uint32, w, l, _, _ uintptr) uintptr {
 	if id == 0x14 { // WM_ERASEBKGND: WM_DRAWITEM fills the entire button.
 		return 1
@@ -105,17 +107,26 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 		updates
 		diagnosticView
 	)
-	theme := newWindowTheme()
-	defer theme.close()
+	snapshot := actions.Snapshot()
+	initialDark := snapshot.Theme.dark(systemDark())
+	theme := newWindowTheme(initialDark)
+	defer func() { theme.close() }()
 	var window uintptr
 	var caption windowCaption
 	var fade pageFade
 	controls := map[uintptr]uintptr{}
 	page := connections
 	pages := [4][]uintptr{}
-	var snapshot Snapshot
 	requestID, grantsKey := "", "\x00"
 	var refresh func()
+	updateColors := func(dark bool) {
+		if dark != theme.dark {
+			fade.stop()
+			theme.setColors(dark)
+			applyWindowMode(window, dark)
+		}
+		win("RedrawWindow", window, 0, 0, 0x1a1)
+	}
 	setText := func(id uintptr, value string) { win("SetWindowTextW", controls[id], wide(value)) }
 	visible := func(id uintptr, show bool) {
 		handle := controls[id]
@@ -217,6 +228,10 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			return caption.hitTest(hwnd, l)
 		case 0x14: // WM_ERASEBKGND; WM_PAINT presents a complete back buffer
 			return 1
+		case 0x1a: // WM_SETTINGCHANGE
+			if dark := snapshot.Theme.dark(systemDark()); window != 0 && dark != theme.dark {
+				updateColors(dark)
+			}
 		case 0x0f: // WM_PAINT
 			theme.paint(hwnd, page)
 			return 0
@@ -228,25 +243,29 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 				return 1
 			}
 			selected := item.id == 135 && page == connections || item.id == 130 && page == settings || item.id == 132 && (page == updates || page == diagnosticView)
+			if index := int(item.id) - themeButtonStart; index >= 0 && index < len(themeChoices) {
+				selected = themeChoices[index].mode == snapshot.Theme
+			}
 			theme.button(&item, selected)
 			return 1
 		case 0x135: // WM_CTLCOLORBTN
 			return theme.buttonBackground(win("GetDlgCtrlID", l))
 		case 0x133, 0x134, 0x138: // edit, list box and static control colors
 			element := win("GetDlgCtrlID", l)
-			color, fill, brush := ink, surface, theme.surfaceBrush
+			p := theme.colors
+			color, fill, brush := p.ink, p.surface, theme.surfaceBrush
 			switch element {
 			case 101, 107, 219:
-				fill, brush = elevated, theme.fieldBrush
+				fill, brush = p.elevated, theme.fieldBrush
 			case 202, 207, 211, 214, 217:
-				color = muted
+				color = p.muted
 			case 218:
-				color = accent
+				color = p.accent
 			case 209, 220:
-				color, fill, brush = muted, background, theme.backgroundBrush
+				color, fill, brush = p.muted, p.background, theme.backgroundBrush
 			}
-			gdi.NewProc("SetTextColor").Call(w, color)
-			gdi.NewProc("SetBkColor").Call(w, fill)
+			gdi.NewProc("SetTextColor").Call(w, color.win())
+			gdi.NewProc("SetBkColor").Call(w, fill.win())
 			return brush
 		case 0x10: // WM_CLOSE
 			fade.stop()
@@ -301,6 +320,11 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 			return 0
 		case 0x111:
 			command := w & 0xffff
+			if index := int(command) - themeButtonStart; index >= 0 && index < len(themeChoices) {
+				report(actions.SetTheme(themeChoices[index].mode))
+				refresh()
+				return 0
+			}
 			switch command {
 			case captionMinimize:
 				fade.stop()
@@ -388,7 +412,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 		}
 		return win("DefWindowProcW", hwnd, uintptr(id), w, l)
 	})
-	class := windowClass{Procedure: procedure, Instance: uintptr(instance), Icon: icon, SmallIcon: icon, Cursor: win("LoadCursorW", 0, 32512), Background: theme.backgroundBrush, Name: wide("yaneCompanionDesktop")}
+	class := windowClass{Procedure: procedure, Instance: uintptr(instance), Icon: icon, SmallIcon: icon, Cursor: win("LoadCursorW", 0, 32512), Name: wide("yaneCompanionDesktop")}
 	class.Size = uint32(unsafe.Sizeof(class))
 	if win("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
 		return errors.New("DESKTOP_UNAVAILABLE")
@@ -399,11 +423,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	if window == 0 {
 		return errors.New("DESKTOP_UNAVAILABLE")
 	}
-	dark := int32(1)
-	dwm := windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmSetWindowAttribute")
-	if result, _, _ := dwm.Call(window, 20, uintptr(unsafe.Pointer(&dark)), 4); result != 0 {
-		dwm.Call(window, 19, uintptr(unsafe.Pointer(&dark)), 4)
-	}
+	applyWindowMode(window, initialDark)
 	roundWindow(window)
 	add := func(view int, kind, text string, id uintptr, x, y, width, height int, style, font uintptr) {
 		if view < 0 {
@@ -441,17 +461,20 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	button(connections, "Разрешить", 105, 367, 354, 145)
 	button(connections, "Отклонить", 106, 214, 354, 142)
 
-	label(settings, "Настройки", 205, 46, 166, 468, 29, theme.heading)
-	label(settings, "Адрес yaneMedia", 215, 46, 200, 468, 21, theme.body)
-	add(settings, "EDIT", actions.Snapshot().Site, 101, 56, 229, 321, 24, 0x10080, theme.body)
+	label(settings, "Адрес yaneMedia", 215, 46, 171, 468, 21, theme.body)
+	add(settings, "EDIT", snapshot.Site, 101, 56, 203, 321, 24, 0x10080, theme.body)
 	win("SendMessageW", controls[101], 0xc5, 512, 0)
 	win("SendMessageW", controls[101], 0x1501, 0, wide("https://media.example"))
-	button(settings, "Сохранить", 102, 401, 223, 111)
-	label(settings, "Запускать при входе", 216, 46, 276, 314, 26, theme.body)
-	button(settings, "", 104, 401, 267, 111)
-	label(settings, "Разрешённые подключения", 206, 46, 310, 468, 24, theme.body)
-	add(settings, "LISTBOX", "", 107, 56, 342, 313, 46, 0x210101, theme.body)
-	button(settings, "Отозвать", 108, 401, 343, 111)
+	button(settings, "Сохранить", 102, 401, 197, 111)
+	label(settings, "Запускать при входе", 216, 46, 247, 314, 26, theme.body)
+	button(settings, "", 104, 401, 239, 111)
+	label(settings, "Тема", 222, 46, 289, 112, 26, theme.body)
+	for i, choice := range themeChoices {
+		button(settings, choice.label, uintptr(themeButtonStart+i), 171+i*114, 281, 113)
+	}
+	label(settings, "Разрешённые подключения", 206, 46, 326, 468, 24, theme.body)
+	add(settings, "LISTBOX", "", 107, 56, 355, 313, 44, 0x210101, theme.body)
+	button(settings, "Отозвать", 108, 401, 358, 111)
 
 	label(updates, "Обновления", 208, 46, 169, 468, 32, theme.heading)
 	label(updates, "", 207, 46, 207, 468, 53, theme.body)
@@ -476,6 +499,9 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	refresh = func() {
 		before := snapshot
 		snapshot = actions.Snapshot()
+		if before.Theme != snapshot.Theme {
+			updateColors(snapshot.Theme.dark(systemDark()))
+		}
 		title, body := snapshot.connectionText()
 		pending, origin, code, expires := "", "", "", ""
 		if len(snapshot.Requests) != 0 {

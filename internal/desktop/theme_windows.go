@@ -206,7 +206,7 @@ func (t windowTheme) drawPage(dc uintptr, client rect, page int) {
 		roundedRect(dc, rect{46, 349, 377, 402}, 18, p.elevated.win(), p.border.win())
 	}
 	if page == 3 {
-		roundedRect(dc, rect{46, 230, 512, 390}, 24, p.elevated.win(), p.border.win())
+		roundedRect(dc, rect{46, 208, 512, 390}, 24, p.elevated.win(), p.border.win())
 	}
 }
 

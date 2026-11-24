@@ -25,7 +25,7 @@ type Client struct {
 
 func New(platform, version, state, cache string) *Client {
 	return &Client{Feed: FeedURL, Key: PublicKey, Platform: platform, Version: version, State: state, Cache: cache, Now: time.Now,
-		HTTP: &http.Client{Timeout: 10 * time.Minute, Transport: &http.Transport{Proxy: nil, ResponseHeaderTimeout: 10 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+		HTTP: &http.Client{Timeout: 10 * time.Minute, Transport: &http.Transport{Proxy: nil, ResponseHeaderTimeout: 10 * time.Second}, CheckRedirect: githubAssetRedirect}}
 }
 
 func (c *Client) Close() { c.HTTP.CloseIdleConnections() }

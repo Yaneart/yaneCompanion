@@ -5,7 +5,8 @@ param(
   [Parameter(Mandatory=$true)][string]$PublicKey,
   [Parameter(Mandatory=$true)][string]$KeyFile,
   [string]$PreviousManifest = '',
-  [string]$Go = 'go'
+  [string]$Go = 'go',
+  [switch]$AllowUnsignedWindows
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -25,7 +26,10 @@ $names = [ordered]@{
 $artifacts = @()
 foreach ($platform in $names.Keys) {
   $file = Get-Item -LiteralPath (Join-Path $packageRoot $names[$platform])
-  if ($platform -eq 'windows-amd64' -and (Get-AuthenticodeSignature -LiteralPath $file.FullName).Status -ne 'Valid') { throw 'Public manifest requires the Authenticode-signed Windows release package' }
+  if ($platform -eq 'windows-amd64') {
+    $status = (Get-AuthenticodeSignature -LiteralPath $file.FullName).Status
+    if ($status -ne 'Valid' -and -not ($AllowUnsignedWindows -and $status -eq 'NotSigned')) { throw 'Windows release requires valid Authenticode or an unsigned installer with explicit AllowUnsignedWindows' }
+  }
   $artifacts += [ordered]@{ platform=$platform; name=$file.Name; url=$ReleaseBaseUrl.TrimEnd('/')+'/'+$file.Name; size=$file.Length; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
 $now = [DateTimeOffset]::UtcNow
@@ -36,11 +40,24 @@ if ($PreviousManifest) {
   $envelope = Get-Content -LiteralPath $PreviousManifest -Raw | ConvertFrom-Json
   $prior = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($envelope.payload)) | ConvertFrom-Json
   if ($Sequence -le $prior.sequence) { throw 'Sequence must strictly increase' }
-  $manifest.previous = $prior.current
+  if ($prior.current.version -eq $Version) {
+    if ($prior.current.packages.Count -ne $artifacts.Count) { throw 'Published package set changed; use a new version' }
+    foreach ($artifact in $artifacts) {
+      $published = $prior.current.packages | Where-Object platform -CEQ $artifact.platform
+      if (-not $published -or $published.name -cne $artifact.name -or $published.url -cne $artifact.url -or $published.size -ne $artifact.size -or $published.sha256 -cne $artifact.sha256) { throw 'Published package changed; use a new version' }
+    }
+    if ($prior.previous) { $manifest.previous = $prior.previous }
+  } else {
+    $manifest.previous = $prior.current
+  }
 }
-$inputPath = Join-Path $packageRoot 'release-input.json'
 $outputPath = Join-Path $packageRoot 'release.json'
-[IO.File]::WriteAllText($inputPath, ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
-& $Go -C $projectRoot run ./cmd/release-manifest -manifest $inputPath -packages $packageRoot -key-file $KeyFile -public-key $PublicKey -out $outputPath
-if ($LASTEXITCODE -ne 0) { throw 'Manifest signing failed; nothing has been published' }
+$inputPath = [IO.Path]::GetTempFileName()
+try {
+  [IO.File]::WriteAllText($inputPath, ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+  & $Go -C $projectRoot run ./cmd/release-manifest -manifest $inputPath -packages $packageRoot -key-file $KeyFile -public-key $PublicKey -out $outputPath
+  if ($LASTEXITCODE -ne 0) { throw 'Manifest signing failed; nothing has been published' }
+} finally {
+  Remove-Item -LiteralPath $inputPath
+}
 Write-Output "Signed manifest ready: $outputPath (not published). Keep previous packages available for rollback."

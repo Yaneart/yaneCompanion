@@ -21,7 +21,7 @@ const themeCSS = `
 #window-frame * { font-family: Manrope, sans-serif; font-size: 15px; font-weight: 500; color: @yane_ink; }
 #window-frame #hero-title, #window-frame #title { font-size: 25px; font-weight: 700; }
 #window-frame #heading { font-size: 21px; font-weight: 700; }
-#window-frame #hero-caption, #window-frame #caption, #window-frame #site-caption, #window-frame #footer { font-size: 13px; }
+#window-frame #hero-caption, #window-frame #site-caption, #window-frame #footer { font-size: 13px; }
 #window-frame #hero-caption, #window-frame #secondary, #window-frame #site-caption, #window-frame #footer { color: @yane_muted; }
 #window-frame #site-address { color: @yane_accent; }
 #window-frame #nav, #window-frame #panel {

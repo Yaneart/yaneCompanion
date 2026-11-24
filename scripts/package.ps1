@@ -9,13 +9,17 @@ param(
   [string]$TimestampUrl = '',
   [string]$UpdateFeedUrl = '',
   [string]$UpdatePublicKey = '',
-  [switch]$Release
+  [switch]$Release,
+  [switch]$AllowUnsignedWindows
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $version = '0.3.0'
 if ($Release -and (-not $SiteOrigin -or -not $ReleaseBaseUrl -or -not $UpdateFeedUrl -or -not $UpdatePublicKey)) { throw 'Release requires SiteOrigin, ReleaseBaseUrl, UpdateFeedUrl and UpdatePublicKey' }
 if ($ReleaseBaseUrl -and $ReleaseBaseUrl -notmatch '^https://[^\s"''?#]+$') { throw 'ReleaseBaseUrl must be HTTPS without query or fragment' }
+if ($AllowUnsignedWindows -and (-not $Release -or $Target -ne 'windows-amd64' -or $SignTool -or $SigningThumbprint -or $TimestampUrl)) { throw 'AllowUnsignedWindows applies only to a Windows release without Authenticode inputs' }
+$signWindowsRelease = $Release -and $Target -eq 'windows-amd64' -and -not $AllowUnsignedWindows
+if ($signWindowsRelease -and (-not $SignTool -or -not (Test-Path -LiteralPath $SignTool -PathType Leaf) -or $SignTool.Contains('"') -or $SigningThumbprint -notmatch '^[a-fA-F0-9]{40}$' -or $TimestampUrl -notmatch '^https://[a-zA-Z0-9./:_-]+$')) { throw 'Release requires SignTool, SigningThumbprint and HTTPS TimestampUrl, or explicit AllowUnsignedWindows' }
 $helperVersion = if ($Release) { $version } else { "$version-dev" }
 & (Join-Path $PSScriptRoot 'build.ps1') -Target $Target -Go $Go -SiteOrigin $SiteOrigin -Version $helperVersion -UpdateFeedUrl $UpdateFeedUrl -UpdatePublicKey $UpdatePublicKey
 & (Join-Path $PSScriptRoot 'assemble.ps1') -Target $Target
@@ -28,15 +32,14 @@ Copy-Item -LiteralPath (Join-Path $puregoRoot 'LICENSE') -Destination (Join-Path
 Copy-Item -LiteralPath (Join-Path $projectRoot '.tools\go-mod\cache\download\github.com\ebitengine\purego\@v\v0.10.2.zip') -Destination (Join-Path $bundlePath 'sources\purego-v0.10.2.zip') -Force
 $hostSources = Join-Path $bundlePath 'sources\companion-host'
 New-Item -ItemType Directory -Force -Path $hostSources | Out-Null
-foreach ($name in @('cmd','internal','release','scripts','packaging','build','test','go.mod','go.sum','README.md','THIRD_PARTY_NOTICES.md')) {
+foreach ($name in @('cmd','internal','release','scripts','packaging','build','test','go.mod','go.sum','README.md','LICENSE','THIRD_PARTY_NOTICES.md')) {
   Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $hostSources -Recurse -Force
 }
 if ($Target -eq 'windows-amd64') {
   if (-not $Compiler) { $Compiler = Join-Path $projectRoot '.tools\inno-7.1.1\ISCC.exe' }
   if (-not (Test-Path -LiteralPath $Compiler)) { throw 'Pass -Compiler with Inno Setup 7.1.1 ISCC.exe' }
   $compilerArgs = @('/Qp', "/DBundleDir=$bundlePath", "/DOutputDir=$outputPath", "/DAppVersion=$version")
-  if ($Release) {
-    if (-not (Test-Path -LiteralPath $SignTool) -or $SignTool.Contains('"') -or $SigningThumbprint -notmatch '^[a-fA-F0-9]{40}$' -or $TimestampUrl -notmatch '^https://[a-zA-Z0-9./:_-]+$') { throw 'Release requires SignTool, SigningThumbprint and HTTPS TimestampUrl' }
+  if ($signWindowsRelease) {
     & $SignTool sign /sha1 $SigningThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 (Join-Path $bundlePath 'yanecompanion.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Host Authenticode signing failed' }
     if ((Get-AuthenticodeSignature -LiteralPath (Join-Path $bundlePath 'yanecompanion.exe')).Status -ne 'Valid') { throw 'Host Authenticode verification failed' }
@@ -46,7 +49,7 @@ if ($Target -eq 'windows-amd64') {
   & $Compiler @compilerArgs (Join-Path $projectRoot 'packaging\windows\setup.iss')
   if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
   $installer = Join-Path $outputPath "yanecompanion-$version-windows-amd64-setup.exe"
-  if ($Release -and (Get-AuthenticodeSignature -LiteralPath $installer).Status -ne 'Valid') { throw 'Installer Authenticode verification failed' }
+  if ($signWindowsRelease -and (Get-AuthenticodeSignature -LiteralPath $installer).Status -ne 'Valid') { throw 'Installer Authenticode verification failed' }
 } else {
   & docker build -t yanecompanion-packager -f (Join-Path $projectRoot 'packaging\linux\Dockerfile') (Join-Path $projectRoot 'packaging\linux')
   if ($LASTEXITCODE -ne 0) { throw 'Linux packaging tools failed' }

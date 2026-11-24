@@ -446,16 +446,11 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 		button(updates, "button", "Скачать предыдущую версию", 46, 307, 225, updateAction(func() error { return actions.DownloadUpdate(true) })),
 	}
 	folder := button(updates, "button", "Открыть папку пакетов", 283, 307, 229, func() {
-		err := actions.UpdateFolder()
-		report(err)
-		if err == nil {
-			gtk.LabelSet(feedback, "Папка пакетов открыта.")
-		}
+		report(actions.UpdateFolder())
 	})
 	diagnosis := panel("diagnostics")
 	label(diagnosis, "heading", "Диагностика", 46, 169, 468, 32, 1)
-	label(diagnosis, "caption", "Технический отчёт о работе помощника.", 46, 205, 468, 22, 1)
-	reportBuffer := readOnly(diagnosis, "diagnostic-report", 46, 230, 466, 160)
+	reportBuffer := readOnly(diagnosis, "diagnostic-report", 46, 208, 466, 182)
 	var displayedReport string
 	footerButtons[0] = button(root, "button", "Назад", 24, 421, 96, func() { setPage("updates", true) })
 	footerButtons[1] = button(root, "button", "Скопировать отчёт", 130, 421, 179, func() {

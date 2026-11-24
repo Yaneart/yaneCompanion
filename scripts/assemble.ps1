@@ -45,5 +45,6 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'release\x-sys-LICENSE.txt') -Des
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build') -Destination (Join-Path $destination 'sources') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'release\media') -Destination (Join-Path $destination 'sources') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'release\dependencies.lock.json') -Destination $destination -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $destination -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $destination -Force
-Write-Output "Assembled $Target (unsigned development bundle)"
+Write-Output "Assembled $Target"

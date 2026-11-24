@@ -1,4 +1,7 @@
-# Компоненты development bundle
+# Лицензии включённых компонентов
+
+Собственный код yaneCompanion распространяется по [MIT](LICENSE). Включённые
+компоненты распространяются на условиях своих лицензий.
 
 | Компонент                       | Версия                                           | Условия и материалы                                                                    |
 | ------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |
@@ -6,7 +9,7 @@
 | golang.org/x/sys                | 0.49.0                                           | BSD-3-Clause; `licenses/x-sys-LICENSE.txt`; source commit в lock                       |
 | ebitengine/purego (Linux UI)    | 0.10.2                                           | Apache-2.0; `licenses/purego-Apache-2.0.txt`; source ZIP included                     |
 | Manrope                         | Google Fonts `b31870a`                           | SIL OFL 1.1; `Manrope-OFL.txt`                                                       |
-| TorrServer                      | MatriX.148-companion.1                           | GPL v3, отдельный процесс; upstream source, изменённые patch sources и recipe включены |
+| TorrServer                      | MatriX.148-companion.5                           | GPL v3, отдельный процесс; upstream source, изменённые patch sources и recipe включены |
 | FFmpeg/ffprobe                  | 9.0.2                                            | Эта build configuration — LGPL v2.1; подписанный source archive и recipe включены      |
 | glibc / MinGW-w64 / GCC runtime | версии зафиксированы snapshot и package manifest | Фактические copyright/license notices включены в media build output                    |
 
@@ -18,12 +21,9 @@ Companion build изменяет обязательность raw HTTP auth и �
 Patch recipe, policy, dependency source archive и build inputs поставляются в
 `sources/companion-engine/`; исходные версии и hashes находятся в lock.
 
-Это unsigned development bundle. Перед внешней публикацией требуется завершить
-лицензионную проверку фактически статически включённых runtime libraries, обеспечить
-corresponding source/relinking materials для применимых LGPL/GPL компонентов и
-выбрать лицензию собственного кода. Наличие одного файла notices не закрывает эти
-требования. Установщики и путь Authenticode signing реализованы в LC-010;
-внешняя публикация выполняется владельцем.
+Перед публикацией проверьте лицензии фактически слинкованных библиотек и наличие
+соответствующих репозиторию версии исходников и материалов для повторной линковки
+в комплекте GPL/LGPL-компонентов.
 
 Linux UI использует системные GTK 3, GLib и libayatana-appindicator3, которые
 устанавливает пакетный менеджер из подписанных репозиториев дистрибутива. Они не

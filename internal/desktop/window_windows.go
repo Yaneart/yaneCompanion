@@ -350,11 +350,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 					report(errors.New(diagnostics.Message(err)))
 				}
 			case 304:
-				if err := actions.UpdateFolder(); err != nil {
-					report(err)
-				} else {
-					setText(220, "Папка пакетов открыта.")
-				}
+				report(actions.UpdateFolder())
 			case 305:
 				reportText := strings.TrimRight(actions.Diagnostics(), "\r\n")
 				setText(219, strings.ReplaceAll(reportText, "\n", "\r\n"))
@@ -484,8 +480,7 @@ func Run(ctx context.Context, actions Actions, show <-chan struct{}, hidden bool
 	button(updates, "Открыть папку пакетов", 304, 283, 307, 229)
 	button(updates, "Диагностика", 305, 46, 350, 225)
 	label(diagnosticView, "Диагностика", 221, 46, 169, 468, 32, theme.heading)
-	label(diagnosticView, "Технический отчёт о работе помощника.", 2110, 46, 205, 468, 22, theme.caption)
-	add(diagnosticView, "EDIT", "", 219, 56, 239, 445, 145, 0x00210844, theme.body)
+	add(diagnosticView, "EDIT", "", 219, 56, 217, 445, 167, 0x00210844, theme.body)
 	button(diagnosticView, "Назад", 133, 24, 421, 96)
 	button(diagnosticView, "Скопировать отчёт", 306, 130, 421, 179)
 	add(-1, "STATIC", release.Version, 209, 426, 428, 110, 20, 2, theme.caption)

@@ -14,7 +14,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$version = '0.3.0'
+$version = '0.3.1'
 if ($Release -and (-not $SiteOrigin -or -not $ReleaseBaseUrl -or -not $UpdateFeedUrl -or -not $UpdatePublicKey)) { throw 'Release requires SiteOrigin, ReleaseBaseUrl, UpdateFeedUrl and UpdatePublicKey' }
 if ($ReleaseBaseUrl -and $ReleaseBaseUrl -notmatch '^https://[^\s"''?#]+$') { throw 'ReleaseBaseUrl must be HTTPS without query or fragment' }
 if ($AllowUnsignedWindows -and (-not $Release -or $Target -ne 'windows-amd64' -or $SignTool -or $SigningThumbprint -or $TimestampUrl)) { throw 'AllowUnsignedWindows applies only to a Windows release without Authenticode inputs' }

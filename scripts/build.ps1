@@ -1,4 +1,4 @@
-param([ValidateSet('windows-amd64','linux-amd64')][string]$Target = 'windows-amd64', [string]$Go = 'go', [string]$SiteOrigin = '', [string]$Version = '0.3.0-dev', [string]$UpdateFeedUrl = '', [string]$UpdatePublicKey = '')
+param([ValidateSet('windows-amd64','linux-amd64')][string]$Target = 'windows-amd64', [string]$Go = 'go', [string]$SiteOrigin = '', [string]$Version = '0.3.1-dev', [string]$UpdateFeedUrl = '', [string]$UpdatePublicKey = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $goVersion = & $Go version

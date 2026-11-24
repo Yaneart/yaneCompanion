@@ -28,7 +28,7 @@ AbortOnFail
 EOF
 chmod 755 "$stage/usr/lib/yanecompanion/yanecompanion" "$stage/usr/lib/yanecompanion/package-guard" "$stage/usr/lib/yanecompanion/tools/"*
 find "$stage" -type d -exec chmod 755 {} +
-chmod -R a+rX "$stage/usr/lib/yanecompanion/sources" "$stage/usr/lib/yanecompanion/licenses"
+chmod -R a+rX "$stage/usr"
 archive="yanecompanion-$version-linux-amd64.tar.gz"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -czf "$output/$archive" -C "$stage" usr
 archive_hash=$(sha256sum "$output/$archive" | cut -d' ' -f1)

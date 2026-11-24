@@ -15,7 +15,7 @@ import (
 //go:embed dependencies.lock.json
 var locked []byte
 
-var Version = "0.3.0-dev"
+var Version = "0.3.1-dev"
 
 const EngineVersion = "MatriX.148-companion.5"
 const MediaVersion = "9.0.2"

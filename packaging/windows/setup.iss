@@ -5,7 +5,7 @@
   #error OutputDir is required
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.3.1"
 #endif
 #ifndef MinimumWindowsVersion
   #define MinimumWindowsVersion "10.0.19041"

@@ -1,4 +1,4 @@
-param([string]$Go = 'go', [string]$Version = '0.3.0-dev')
+param([string]$Go = 'go', [string]$Version = '0.3.1-dev')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildScript = Join-Path $PSScriptRoot 'build.ps1'

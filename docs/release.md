@@ -25,7 +25,6 @@ $feed = 'https://raw.githubusercontent.com/Yaneart/yaneCompanion/updates/release
 $release = @{
   Go = $go
   SiteOrigin = $siteOrigin
-  ReleaseBaseUrl = $base
   UpdateFeedUrl = $feed
   UpdatePublicKey = $publicKey
   Release = $true
@@ -44,7 +43,7 @@ $release = @{
 Для будущего выпуска с Authenticode не передавайте `-AllowUnsignedWindows`. При
 сборке Windows вместо него задайте `-SignTool`, `-SigningThumbprint` и `-TimestampUrl`.
 
-## GitHub, сайт и AUR
+## GitHub и сайт
 
 Готовый релиз можно опубликовать одной командой от имени владельца. Нужны
 Python 3.11+, Go проекта и [GitHub CLI](https://cli.github.com/) с входом через
@@ -70,7 +69,7 @@ python3 scripts/publish-release.py --publish
 владельца, подпись создаётся локальным инструментом из предыдущего раздела.
 
 При ручной публикации выполните первые два пункта. После публикации GitHub
-выполните шаги для сайта, AUR и приёмки.
+выполните шаги для сайта и приёмки.
 
 1. Владелец открывает репозиторий и публикует релиз `0.3.1`. В Assets загружает четыре
    пакета из `packages.json` и сам `packages.json` с контрольными суммами. Проверяет
@@ -80,12 +79,9 @@ python3 scripts/publish-release.py --publish
    Проверяет загрузку манифеста по закреплённому адресу и через «Поддержка» в приложении.
 3. Соберите Public frontend с `VITE_COMPANION_DOWNLOAD_BASE_URL`, равным `$base`,
    и `VITE_COMPANION_DOWNLOAD_VERSION=0.3.1`. В Docker Compose передайте их через
-   окружение или корневой `.env`. Проверьте три кнопки загрузки и «Все версии на GitHub».
-4. Для AUR возьмите `dist/packages/aur/PKGBUILD` и `yanecompanion-bin.install`.
-   Под обычным пользователем Arch выполните `makepkg --printsrcinfo > .SRCINFO`,
-   затем проверьте `makepkg --verifysource` и установку собранного пакета. После
-   публикации проверьте `yay -S yanecompanion-bin` и обновление через yay.
-5. На HTTPS-сайте пройдите чистую установку, запуск из меню и через ссылку сайта,
+   окружение или корневой `.env`. Проверьте три кнопки загрузки, команды установки
+   Linux и ссылку «Все версии на GitHub».
+4. На HTTPS-сайте пройдите чистую установку, запуск из меню и через ссылку сайта,
    разрешение локальной сети, сопряжение, воспроизведение и удаление. Проверьте
    загрузку пакета в «Поддержке», профиль после обновления и откат, когда доступна
    предыдущая версия. Сверьте матрицу проверок с [verification.md](verification.md)

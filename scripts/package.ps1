@@ -3,7 +3,6 @@ param(
   [string]$Go = 'go',
   [string]$SiteOrigin = '',
   [string]$Compiler = '',
-  [string]$ReleaseBaseUrl = '',
   [string]$SignTool = '',
   [string]$SigningThumbprint = '',
   [string]$TimestampUrl = '',
@@ -15,8 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $version = '0.3.1'
-if ($Release -and (-not $SiteOrigin -or -not $ReleaseBaseUrl -or -not $UpdateFeedUrl -or -not $UpdatePublicKey)) { throw 'Release requires SiteOrigin, ReleaseBaseUrl, UpdateFeedUrl and UpdatePublicKey' }
-if ($ReleaseBaseUrl -and $ReleaseBaseUrl -notmatch '^https://[^\s"''?#]+$') { throw 'ReleaseBaseUrl must be HTTPS without query or fragment' }
+if ($Release -and (-not $SiteOrigin -or -not $UpdateFeedUrl -or -not $UpdatePublicKey)) { throw 'Release requires SiteOrigin, UpdateFeedUrl and UpdatePublicKey' }
 if ($AllowUnsignedWindows -and (-not $Release -or $Target -ne 'windows-amd64' -or $SignTool -or $SigningThumbprint -or $TimestampUrl)) { throw 'AllowUnsignedWindows applies only to a Windows release without Authenticode inputs' }
 $signWindowsRelease = $Release -and $Target -eq 'windows-amd64' -and -not $AllowUnsignedWindows
 if ($signWindowsRelease -and (-not $SignTool -or -not (Test-Path -LiteralPath $SignTool -PathType Leaf) -or $SignTool.Contains('"') -or $SigningThumbprint -notmatch '^[a-fA-F0-9]{40}$' -or $TimestampUrl -notmatch '^https://[a-zA-Z0-9./:_-]+$')) { throw 'Release requires SignTool, SigningThumbprint and HTTPS TimestampUrl, or explicit AllowUnsignedWindows' }
@@ -53,7 +51,7 @@ if ($Target -eq 'windows-amd64') {
 } else {
   & docker build -t yanecompanion-packager -f (Join-Path $projectRoot 'packaging\linux\Dockerfile') (Join-Path $projectRoot 'packaging\linux')
   if ($LASTEXITCODE -ne 0) { throw 'Linux packaging tools failed' }
-  & docker run --rm --mount "type=bind,source=$projectRoot,target=/project" yanecompanion-packager sh /project/scripts/package-linux.sh /project/dist/linux-amd64 /project/dist/packages $version $ReleaseBaseUrl
+  & docker run --rm --mount "type=bind,source=$projectRoot,target=/project" yanecompanion-packager sh /project/scripts/package-linux.sh /project/dist/linux-amd64 /project/dist/packages $version
   if ($LASTEXITCODE -ne 0) { throw 'Linux packaging failed' }
 }
 $packageNames = @("yanecompanion-$version-windows-amd64-setup.exe", "yanecompanion_${version}_amd64.deb", "yanecompanion-bin-$version-1-x86_64.pkg.tar.zst", "yanecompanion-$version-linux-amd64.tar.gz")

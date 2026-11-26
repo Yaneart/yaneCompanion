@@ -3,7 +3,6 @@ set -eu
 bundle=$(realpath "$1")
 output=$(realpath "$2")
 version=$3
-base=${4:-}
 case "$version" in *[!0-9.]*|'') echo 'Invalid version' >&2; exit 1;; esac
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
@@ -31,7 +30,6 @@ find "$stage" -type d -exec chmod 755 {} +
 chmod -R a+rX "$stage/usr"
 archive="yanecompanion-$version-linux-amd64.tar.gz"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -czf "$output/$archive" -C "$stage" usr
-archive_hash=$(sha256sum "$output/$archive" | cut -d' ' -f1)
 mkdir -p "$stage/DEBIAN"
 cat > "$stage/DEBIAN/control" <<EOF
 Package: yanecompanion
@@ -74,30 +72,4 @@ pre_upgrade() { /usr/lib/yanecompanion/package-guard; }
 pre_remove() { /usr/lib/yanecompanion/package-guard; }
 EOF
 bsdtar --uid 0 --gid 0 -c --zstd -f "$output/yanecompanion-bin-$version-1-x86_64.pkg.tar.zst" -C "$stage" .PKGINFO .INSTALL usr
-mkdir -p "$output/aur"
-# A previous release's .SRCINFO must never accompany a newly generated recipe.
-# The owner regenerates it with makepkg after choosing the final release URL.
-rm -f "$output/aur/.SRCINFO"
-cp "$stage/.INSTALL" "$output/aur/yanecompanion-bin.install"
-if [ -n "$base" ]; then source="${base%/}/$archive"; else source="$archive"; fi
-cat > "$output/aur/PKGBUILD" <<EOF
-# Owner publishes this directory after supplying the final HTTPS ReleaseBaseUrl.
-pkgname=yanecompanion-bin
-pkgver=$version
-pkgrel=1
-pkgdesc='Local torrent playback companion for yaneMedia'
-arch=('x86_64')
-license=('custom')
-options=('!strip' '!debug')
-depends=('glibc' 'gtk3' 'libayatana-appindicator' 'xdg-utils' 'desktop-file-utils')
-provides=("yanecompanion=\$pkgver")
-conflicts=('yanecompanion')
-install=yanecompanion-bin.install
-source=('$source')
-sha256sums=('$archive_hash')
-package() {
-  cp -a "\$srcdir/usr" "\$pkgdir/"
-}
-EOF
-if [ -z "$base" ]; then cp "$output/$archive" "$output/aur/$archive"; fi
-echo "Built Debian, Arch and AUR materials; publication is manual."
+echo 'Built Debian and Arch packages and Linux archive.'
